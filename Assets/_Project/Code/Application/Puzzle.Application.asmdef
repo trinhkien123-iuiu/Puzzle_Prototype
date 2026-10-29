@@ -1,0 +1,16 @@
+{
+    "name": "Puzzle.Application",
+    "rootNamespace": "Puzzle.Application",
+    "references": [
+        "Puzzle.Domain"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

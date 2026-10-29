@@ -1,0 +1,21 @@
+{
+    "name": "Puzzle.Editor",
+    "rootNamespace": "Puzzle.Editor",
+    "references": [
+        "Puzzle.Domain",
+        "Puzzle.Application",
+        "Puzzle.Presentation",
+        "Puzzle.Bootstrap"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
