@@ -14,6 +14,8 @@ namespace Puzzle.Domain.Puzzle
         private readonly IRule[] _rules;
         private readonly Edge[] _givenBorders;
         private readonly Edge[] _solutionBorders;
+        private readonly HashSet<Edge> _givenSet;
+        private readonly HashSet<Edge> _solutionSet;
 
         public BoardShape Board { get; }
         public IReadOnlyList<IRule> Rules => _rules;
@@ -33,6 +35,17 @@ namespace Puzzle.Domain.Puzzle
             _solutionBorders = ToArray(solutionBorders, nameof(solutionBorders));
             RequireOnBoard(_givenBorders);
             RequireOnBoard(_solutionBorders);
+            _givenSet = new HashSet<Edge>(_givenBorders);
+            _solutionSet = new HashSet<Edge>(_solutionBorders);
+        }
+
+        /// <summary>Cạnh cho sẵn trong đề: command không được đổi.</summary>
+        public bool IsGivenBorder(Edge edge) => _givenSet.Contains(edge);
+
+        /// <summary>Trạng thái của cạnh trong lời giải: Border hoặc Joined.</summary>
+        public EdgeState SolutionStateOf(Edge edge)
+        {
+            return _solutionSet.Contains(edge) ? EdgeState.Border : EdgeState.Joined;
         }
 
         public PuzzleState CreateInitialState()

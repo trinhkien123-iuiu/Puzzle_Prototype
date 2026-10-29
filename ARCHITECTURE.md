@@ -49,7 +49,7 @@ SOLID là thước đo khi review code. Mỗi nguyên tắc dưới đây có **
 
 - Mọi `IRule` tuân **cùng một hợp đồng**: chỉ đọc `RuleContext`, không ném exception với trạng thái dở dang, trả lỗi qua `violations`, chạy nhanh (không giải puzzle bên trong).
 - Mọi `ICommand`: `Undo()` sau `Do()` phải trả `PuzzleState` về **đúng như cũ**. Test chung `CommandContractTests` chạy cho mọi command.
-- Mọi `IBooster`: `CanUse() == false` thì `CreateCommand()` không được gọi; không booster nào tự sửa state ngoài command.
+- Mọi `IBooster`: `CanUse() == false` thì `Use()` không được gọi; không booster nào tự sửa state, muốn đổi state thì trả command trong `BoosterResult`.
 - Mọi `IProgressStore`: lưu rồi đọc lại phải ra cùng dữ liệu. Bản `PlayerPrefs` và bản giả dùng trong test đều qua cùng một bộ test.
 
 **Dấu hiệu vi phạm:** code gọi phải kiểm tra kiểu cụ thể trước khi dùng; một cài đặt ném `NotSupportedException`; test chạy được với cài đặt này mà hỏng với cài đặt khác.
@@ -115,10 +115,10 @@ Assets/_Project/
 │   │   ├── Rules/                 IRule, RuleContext, RuleViolation
 │   │   │   └── <TenLuat>/         MỖI LUẬT MỘT THƯ MỤC: XxxRule.cs (+ XxxClue.cs nếu có ký hiệu)
 │   │   ├── Puzzle/                PuzzleDefinition, PuzzleState, PuzzleValidator
-│   │   └── Solving/               Solver, HintFinder
+│   │   └── Solving/               HintFinder, MistakeFinder (sau: Solver)
 │   ├── Application/               Puzzle.Application
 │   │   ├── Session/               PuzzleSession, ICommand, UndoHistory
-│   │   ├── Commands/              MergeCellsCommand, SetEdgeCommand, ClearCommand…
+│   │   ├── Commands/              MergeCellsCommand, SetEdgeCommand, ClearRegionCommand
 │   │   ├── Boosters/              IBooster + mỗi booster một file
 │   │   ├── Levels/                LevelCatalog, LevelLoader (asset → PuzzleDefinition)
 │   │   └── Progress/              IProgressStore, PlayerProgress
@@ -190,7 +190,7 @@ Nếu thêm luật mà phải sửa `PuzzleValidator`, `BoardView` hay một lu�
 - `PuzzleSession` cài hai interface tách biệt (mục 0b, chữ I): `IPuzzleReader` (snapshot + sự kiện `Changed`) và `IPuzzleCommands` (`Execute`, `Undo`, `Redo`). Ai chỉ cần đọc thì chỉ nhận `IPuzzleReader`.
 - `SessionSnapshot` là dữ liệu chỉ đọc (vùng, lỗi, đã giải chưa). View vẽ từ snapshot, không hỏi lại session.
 - `ICommand { void Do(PuzzleState); void Undo(PuzzleState); }`. Command nhỏ, mỗi command một thao tác của người chơi.
-- Booster cài `IBooster { bool CanUse(IPuzzleReader); ICommand CreateCommand(IPuzzleReader); }`. Booster **trả về command**, không tự sửa state, nên luôn undo được và dùng chung luồng kiểm tra.
+- Booster cài `IBooster { bool CanUse(IPuzzleReader); BoosterResult Use(IPuzzleReader); }`. `BoosterResult` gồm command (có thể null) và các ô cần làm nổi bật. Booster đổi state thì **trả về command** cho Presenter đưa vào `PuzzleSession.Execute`, nên luôn undo được và dùng chung luồng kiểm tra; booster chỉ báo tin (Kiểm tra) thì không có command.
 - Gợi ý lấy từ `HintFinder` (Domain), dựa trên lời giải có sẵn trong level hoặc solver.
 - Lưu tiến độ qua interface `IProgressStore` (định nghĩa ở Application). Cài đặt `PlayerPrefsProgressStore` nằm ở Presentation; đổi sang file/cloud không sửa code gọi.
 - Application cần thời gian hoặc ngẫu nhiên thì dùng `IClock`, `IRandom`, không gọi thẳng `Time` hay `UnityEngine.Random`.
@@ -313,3 +313,38 @@ Docs/
 
 - Đổi kiến trúc → sửa file này trong **cùng commit**, ghi lý do vào `Docs/decisions.md`.
 - Commit nhỏ, mỗi commit một chủ đề, test xanh. Không commit asset của game khác.
+
+---
+
+## 14. Mobile
+
+Game build cho **mobile**: Android trước, iOS sau. Mọi quyết định giao diện và vòng đời app theo mục này; bản PC tham khảo chỉ để hiểu luật.
+
+**Màn hình và thao tác**
+- Màn dọc cố định (portrait), thao tác **một ngón**. Không phím tắt, không hover, không chuột phải, không đa chạm bắt buộc.
+- Mọi thao tác của bản PC phải có cử chỉ chạm hoặc nút:
+
+| Bản PC | Mobile | Command |
+|---|---|---|
+| Kéo chuột qua các ô (gộp vùng), Shift-click | Kéo ngón qua các ô | `MergeCellsCommand` (cả lần kéo = một command) |
+| Click cạnh đặt ranh giới | Chạm cạnh: đặt ranh giới, chạm lại để xoá | `SetEdgeCommand` |
+| Chuột phải xoá | Nhấn giữ một ô: xoá vùng chứa nó | `ClearRegionCommand` |
+| Tab đổi chế độ | Nút chuyển chế độ trên HUD (gộp ô / vẽ ranh giới) | không đổi state |
+| Ctrl+Z / Ctrl+Y | Nút Undo / Redo trên HUD | `PuzzleSession.Undo/Redo` |
+| Phím 1–9 đổi màu, Q tô vùng | Không cần: màu vùng tự gán theo `RegionMap` | không có |
+
+- Mục tiêu chạm tối thiểu **48dp** (Apple 44pt). Cạnh mỏng nên vùng chạm cạnh là một dải quanh cạnh, độ rộng chỉnh ở `InputConfig`.
+- Bàn lớn nhất phải **vừa màn hình dọc, không zoom**: prototype giới hạn lưới **≤ 7 cột, ≤ 9 hàng** (7 × 48dp + lề vừa màn 360dp). Zoom/pan là quyết định riêng, ghi vào `Docs/decisions.md` trước khi làm.
+- Tôn trọng **safe area** (tai thỏ, thanh điều hướng): HUD và bàn đặt trong `Screen.safeArea`. Hỗ trợ tỉ lệ 16:9 → 20:9 và tablet; `BoardLayoutConfig` tính cỡ ô theo vùng an toàn, không theo độ phân giải cố định.
+
+**Vòng đời app**
+- Mobile có thể bị hệ điều hành kill bất cứ lúc nào. Lưu tiến độ **ngay khi app vào nền** (`OnApplicationPause(true)`), khi qua màn và khi thoát.
+- Ván đang chơi dở được lưu thành `SavedPuzzle` (id level + trạng thái cạnh) và khôi phục khi mở lại. Lịch sử undo không lưu.
+- Gọi lưu nằm ở Presentation/Bootstrap (nơi có `MonoBehaviour`); dữ liệu và định dạng lưu nằm ở `Application/Progress`.
+
+**Hiệu năng**
+- 60 fps trên máy tầm trung. Không cấp phát trong vòng lặp nóng (`Update`, kéo ngón); validate **chỉ chạy sau mỗi command**, không chạy mỗi frame.
+- Trong lúc kéo, Input chỉ vẽ đường xem trước; command tạo một lần khi nhấc ngón.
+
+**Phản hồi**
+- Rung (haptic) đi qua interface `IHaptics` ở Presentation, cài đặt riêng cho Android/iOS; logic không gọi rung trực tiếp. Âm thanh và rung theo sự kiện `Changed` như mục 6.
