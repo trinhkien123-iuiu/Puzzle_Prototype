@@ -99,7 +99,7 @@ Phụ thuộc **chỉ đi xuống**. Tầng dưới không bao giờ biết tầ
 | `Puzzle.Presentation` | Domain, Application | Nơi duy nhất có View, Input, Animation, Audio |
 | `Puzzle.Bootstrap` | tất cả | Chỉ chứa composition root (mục 5) |
 | `Puzzle.Editor` | tất cả | Chỉ nền tảng Editor |
-| `Puzzle.Tests` | Domain, Application | EditMode test |
+| `Puzzle.Tests` | Domain, Application, Presentation | EditMode test (Presentation: chỉ phần C# thuần như `BoardLayout`, `DragPath`, kho lưu) |
 
 ---
 
@@ -120,19 +120,21 @@ Assets/_Project/
 │   │   ├── Session/               PuzzleSession, ICommand, UndoHistory
 │   │   ├── Commands/              MergeCellsCommand, SetEdgeCommand, ClearRegionCommand
 │   │   ├── Boosters/              IBooster + mỗi booster một file
-│   │   ├── Levels/                LevelCatalog, LevelLoader (asset → PuzzleDefinition)
+│   │   ├── Levels/                LevelAsset, LevelCatalog, LevelLoader (.pzl → PuzzleDefinition), LevelSelector
 │   │   └── Progress/              IProgressStore, PlayerProgress
 │   ├── Presentation/              Puzzle.Presentation
-│   │   ├── Board/                 BoardView, CellView, EdgeView, ClueView
-│   │   ├── Input/                 BoardInput (chạm/kéo → ý định)
+│   │   ├── Board/                 BoardLayout, BoardView, CellView, EdgeView, BoardPresenter
+│   │   ├── Input/                 BoardInput (chạm/kéo → ý định), DragPath, BoardActionPresenter
 │   │   ├── Screens/               mỗi màn hình/popup: XxxView.cs + XxxPresenter.cs
 │   │   ├── Feedback/              hiệu ứng, rung, âm thanh theo sự kiện
+│   │   ├── Config/                script ScriptableObject cấu hình (asset nằm ở Config/ gốc)
+│   │   ├── Persistence/           PlayerPrefsProgressStore
 │   │   └── Pooling/               pool cho ô/cạnh/hiệu ứng
-│   ├── Bootstrap/                 Puzzle.Bootstrap: GameBootstrap (composition root)
-│   └── Editor/                    Puzzle.Editor: Level Editor, validator dữ liệu
+│   ├── Bootstrap/                 Puzzle.Bootstrap: GameBootstrap (composition root), LevelScope
+│   └── Editor/                    Puzzle.Editor: importer .pzl, menu Tools/Puzzle/Setup Greybox Scene
 ├── Tests/                         Puzzle.Tests
 ├── Config/                        ScriptableObject cấu hình, CHIA THEO MẢNG (mục 7)
-├── Levels/<pack>/                 LevelPack + LevelAsset
+├── Levels/<pack>/                 file level .pzl (importer tạo LevelAsset)
 ├── Prefabs/{Board,Screens,Feedback}/
 ├── Art/<tính năng>/               Board/, Clues/, Screens/, Feedback/, Shared/
 ├── Audio/{Sfx,Music}/
@@ -155,7 +157,7 @@ Ngoài repo: asset tham khảo từ game khác (`D:\GitHub\Glimmith_Reference`).
 | `EdgeState` | enum `Unknown / Border / Joined` | |
 | `BoardShape` | lớp bất biến | Ô nào tồn tại (bàn có thể khuyết) |
 | `PuzzleDefinition` | lớp bất biến | Bàn + luật + ký hiệu + lời giải |
-| `PuzzleState` | lớp có thể đổi | Trạng thái từng cạnh + màu tô; chỉ đổi qua Command |
+| `PuzzleState` | lớp có thể đổi | Trạng thái từng cạnh + màu tô từng ô; chỉ đổi qua Command. Vùng = các ô nối bằng cạnh `Joined`; `Border` chỉ là đánh dấu |
 | `RegionMap` | tính ra | Không lưu, không cache ngoài `PuzzleSession` |
 
 **Luật:**
@@ -239,7 +241,7 @@ Mỗi trường có `[Tooltip]`. Thêm mảng mới → thêm asset mới, khôn
 
 - Mỗi level là một `LevelAsset` gồm: bàn, luật + tham số, ký hiệu, **lời giải bắt buộc**, độ khó.
 - Test tự động duyệt mọi level: **lời giải phải thoả mọi luật** và (khi có solver) **lời giải là duy nhất**. Level hỏng thì test đỏ, không đợi người chơi phát hiện.
-- Làm level bằng Level Editor (`Tools/Puzzle/Level Editor`) hoặc nhập từ văn bản ASCII (định dạng ghi ở `Docs/design/level-format.md`).
+- Level là file văn bản `.pzl` (định dạng ở `Docs/design/level-format.md`), Unity tự nhập thành `LevelAsset`. Level Editor trực quan để sau.
 - Không dùng level của game khác.
 
 ---
@@ -326,12 +328,13 @@ Game build cho **mobile**: Android trước, iOS sau. Mọi quyết định giao
 
 | Bản PC | Mobile | Command |
 |---|---|---|
-| Kéo chuột qua các ô (gộp vùng), Shift-click | Kéo ngón qua các ô | `MergeCellsCommand` (cả lần kéo = một command) |
-| Click cạnh đặt ranh giới | Chạm cạnh: đặt ranh giới, chạm lại để xoá | `SetEdgeCommand` |
+| Kéo chuột qua các ô (gộp vùng), Shift-click | Kéo ngón qua các ô: gộp thành một vùng và tô màu đang chọn | `MergeCellsCommand` (cả lần kéo = một command) |
+| Kéo từ góc để đặt ranh giới kim loại | Chạm khe giữa hai ô: đặt ranh giới (đánh dấu "chắc chắn tách", tuỳ chọn), chạm lại để xoá | `SetEdgeCommand` |
 | Chuột phải xoá | Nhấn giữ một ô: xoá vùng chứa nó | `ClearRegionCommand` |
 | Tab đổi chế độ | Nút chuyển chế độ trên HUD (gộp ô / vẽ ranh giới) | không đổi state |
 | Ctrl+Z / Ctrl+Y | Nút Undo / Redo trên HUD | `PuzzleSession.Undo/Redo` |
-| Phím 1–9 đổi màu, Q tô vùng | Không cần: màu vùng tự gán theo `RegionMap` | không có |
+| Phím 1–9 / cuộn chuột đổi màu | Bảng 9 ô màu phía trên hàng nút | không đổi state (`PaintSelection`) |
+| Restart (R) | Nút Chơi lại | `ResetBoardCommand` |
 
 - Mục tiêu chạm tối thiểu **48dp** (Apple 44pt). Cạnh mỏng nên vùng chạm cạnh là một dải quanh cạnh, độ rộng chỉnh ở `InputConfig`.
 - Bàn lớn nhất phải **vừa màn hình dọc, không zoom**: prototype giới hạn lưới **≤ 7 cột, ≤ 9 hàng** (7 × 48dp + lề vừa màn 360dp). Zoom/pan là quyết định riêng, ghi vào `Docs/decisions.md` trước khi làm.

@@ -102,4 +102,4 @@ Các ghi chú hướng dẫn trong game cũng cho thấy:
 - Định dạng dữ liệu level dạng văn bản như trên rất dễ tự định nghĩa lại (JSON/ScriptableObject) và có sẵn lời giải để kiểm tra.
 - Có thể làm **solver/generator** vì mọi luật đều là kiểm tra trên đồ thị vùng; lời giải có sẵn cho phép dựng booster "gợi ý cạnh" chính xác.
 - Thứ tự luật đề xuất cho bản mobile: Single shape → Shape bank → One of each → Gemini/Delta → Area/No rectangles.
-- Không dùng lại level, art hay tên của game gốc; tự thiết kế level mới theo cùng nguyên tắc.
+- Không dùng lại level hay tên của game gốc; tự thiết kế level mới theo cùng nguyên tắc.

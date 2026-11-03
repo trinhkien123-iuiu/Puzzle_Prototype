@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>LYNE Prototype</title>
+<style>
+  :root { --bg: #1d2333; --panel: #2a3247; --text: #eef1f7; --muted: #9aa3b8; --accent: #f5a742; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { display: flex; justify-content: center; }
+  #app { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px;
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); user-select: none; -webkit-user-select: none; }
+  header { display: flex; align-items: center; gap: 8px; }
+  header h1 { flex: 1; margin: 0; text-align: center; font-size: 18px; letter-spacing: .12em; }
+  header small { display: block; font-size: 12px; color: var(--muted); letter-spacing: 0; font-weight: 400; margin-top: 2px; }
+  .nav { width: 40px; height: 40px; border: 0; border-radius: 10px; background: var(--panel); color: var(--text); font-size: 18px; cursor: pointer; }
+  .nav:disabled { opacity: .3; cursor: default; }
+  .rule { background: var(--panel); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; color: #d6dbe8; }
+  #board { width: 100%; max-height: 58vh; display: block; touch-action: none; }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .actions button { height: 46px; border: 0; border-radius: 12px; background: var(--panel); color: var(--text); font-size: 14px; cursor: pointer; }
+  .actions button:disabled { opacity: .35; cursor: default; }
+  .toast { min-height: 18px; text-align: center; font-size: 13px; color: var(--accent); }
+  .credit { margin: 0; text-align: center; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  #solved { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; transform: translateY(110%);
+    transition: transform .3s; pointer-events: none; }
+  #solved.show { transform: none; pointer-events: auto; }
+  #solved .bar { width: 100%; max-width: 480px; margin: 0 16px calc(16px + env(safe-area-inset-bottom)); padding: 12px 16px; border-radius: 14px;
+    background: #2e7d4f; border: 2px solid #7ed6a0; display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+  #solved button { border: 0; border-radius: 10px; padding: 10px 16px; background: #fff; color: #1d5a37; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="nav" id="prev" aria-label="Level trước">‹</button>
+    <h1>LYNE<small id="sub"></small></h1>
+    <button class="nav" id="next" aria-label="Level sau">›</button>
+  </header>
+  <div class="rule">Kéo từ một <b>ô đầu mút</b> (hình tô đặc) qua <b>mọi hình cùng loại</b> rồi kết thúc ở đầu mút còn lại. Đi được 8 hướng.
+    Ô xám có số phải được đi qua đúng bấy nhiêu lần. Hai đường không được dùng chung cạnh hay cắt chéo nhau.</div>
+  <svg id="board"></svg>
+  <div class="toast" id="toast"></div>
+  <div class="actions">
+    <button id="undo">Hoàn tác</button>
+    <button id="reset">Chơi lại</button>
+    <button id="hint">Gợi ý</button>
+  </div>
+  <p class="credit">Prototype dựng lại cơ chế của <i>LYNE</i> (Thomas Bowker). Level tự thiết kế.</p>
+</div>
+<div id="solved"><div class="bar"><span>Hoàn thành ✓</span><button id="continue">Tiếp tục</button></div></div>
+
+<script>
+'use strict';
+// ==LOGIC==
+// Ký hiệu level: T/S/D = đầu mút tam giác/vuông/thoi, t/s/d = nút thường, 1-4 = nút xám (số lần đi qua), . = trống
+const LEVELS = [
+  ['Tt', 'tt', 'tT'],
+  ['TtS', 'tss', 'TsS'],
+  ['sTs', 'S2S', '.T.'],
+  ['STT', '2st', 'S2t'],
+  ['ttts', '.T22', 'sstS', 'STtt'],
+  ['t.tt', 'ttTD', 'sTdS', 'Ss2D'],
+  ['.TtT', 'DSst', '2sdS', 'd22D'],
+  ['Dttd', '22dd', 'TstD', 'SSsT'],
+];
+
+function parseLevel(rows) {
+  const level = { h: rows.length, w: rows[0].length, nodes: [], at: [], shapes: [] };
+  rows.forEach((row, r) => {
+    level.at.push([]);
+    [...row].forEach((ch, c) => {
+      if (ch === '.') { level.at[r].push(-1); return; }
+      const node = { r, c };
+      if (/[1-9]/.test(ch)) { node.grey = true; node.need = +ch; }
+      else { node.shape = ch.toLowerCase(); node.terminal = ch !== ch.toLowerCase(); }
+      level.at[r].push(level.nodes.length);
+      level.nodes.push(node);
+      if (node.shape && !level.shapes.includes(node.shape)) level.shapes.push(node.shape);
+    });
+  });
+  level.shapes.sort();
+  return level;
+}
+
+const edgeKey = (a, b) => a < b ? a + '-' + b : b + '-' + a;
+
+// Cạnh chéo cắt cạnh chéo còn lại trong cùng một ô vuông 2x2.
+function crossingKey(level, a, b) {
+  const A = level.nodes[a], B = level.nodes[b];
+  if (A.r === B.r || A.c === B.c) return null;
+  const x = level.at[A.r][B.c], y = level.at[B.r][A.c];
+  return x >= 0 && y >= 0 ? edgeKey(x, y) : null;
+}
+
+// Tính cạnh đã dùng và số lần đi qua mỗi nút xám từ tập đường hiện tại.
+function usage(level, paths) {
+  const edges = new Set(), grey = new Map();
+  for (const shape in paths) {
+    const p = paths[shape];
+    for (let i = 0; i < p.length; i++) {
+      if (level.nodes[p[i]].grey) grey.set(p[i], (grey.get(p[i]) || 0) + 1);
+      if (i > 0) edges.add(edgeKey(p[i - 1], p[i]));
+    }
+  }
+  return { edges, grey };
+}
+
+function isComplete(level, path) {
+  return path.length > 1 && level.nodes[path[path.length - 1]].terminal;
+}
+
+function canStep(level, paths, shape, to, use) {
+  const path = paths[shape];
+  if (!path || path.length === 0 || isComplete(level, path)) return false;
+  const from = path[path.length - 1];
+  const A = level.nodes[from], B = level.nodes[to];
+  if (Math.max(Math.abs(A.r - B.r), Math.abs(A.c - B.c)) !== 1) return false;
+  if (B.grey) { if ((use.grey.get(to) || 0) >= B.need) return false; }
+  else if (B.shape !== shape || path.includes(to)) return false;
+  if (use.edges.has(edgeKey(from, to))) return false;
+  const cross = crossingKey(level, from, to);
+  return !(cross && use.edges.has(cross));
+}
+
+function isSolved(level, paths) {
+  const use = usage(level, paths);
+  for (const shape of level.shapes) {
+    const p = paths[shape] || [];
+    if (!isComplete(level, p)) return false;
+    const all = level.nodes.every((n, i) => n.shape !== shape || p.includes(i));
+    if (!all) return false;
+  }
+  return level.nodes.every((n, i) => !n.grey || use.grey.get(i) === n.need);
+}
+
+// Quay lui lần lượt từng loại hình. Dừng khi đủ `limit` lời giải.
+function solve(level, limit = 1) {
+  const solutions = [], paths = {};
+  const go = k => {
+    if (solutions.length >= limit) return;
+    if (k === level.shapes.length) {
+      if (isSolved(level, paths)) solutions.push(JSON.parse(JSON.stringify(paths)));
+      return;
+    }
+    const shape = level.shapes[k];
+    const start = level.nodes.findIndex(n => n.shape === shape && n.terminal);
+    paths[shape] = [start];
+    const extend = () => {
+      if (solutions.length >= limit) return;
+      const p = paths[shape];
+      if (isComplete(level, p)) {
+        if (level.nodes.every((n, i) => n.shape !== shape || p.includes(i))) go(k + 1);
+        return;
+      }
+      const use = usage(level, paths);
+      const from = level.nodes[p[p.length - 1]];
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const r = from.r + dr, c = from.c + dc;
+        if (r < 0 || c < 0 || r >= level.h || c >= level.w || level.at[r][c] < 0) continue;
+        const to = level.at[r][c];
+        if (!canStep(level, paths, shape, to, use)) continue;
+        p.push(to);
+        extend();
+        p.pop();
+      }
+    };
+    extend();
+    delete paths[shape];
+  };
+  go(0);
+  return solutions;
+}
+// ==/LOGIC==
+
+// ---------------------------------------------------------------------------
+// Giao diện
+// ---------------------------------------------------------------------------
+const COLORS = { t: '#f5a742', s: '#3fc1b0', d: '#b47cf2' };
+const SZ = 90, R = 24;
+const $ = id => document.getElementById(id);
+const board = $('board');
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem('lyne-proto')) || {}; } catch (e) { return {}; } },
+  set(v) { try { localStorage.setItem('lyne-proto', JSON.stringify(v)); } catch (e) { /* bỏ qua */ } },
+};
+
+let index = 0, level, paths, history, active = null, strokeStart = null, ghost = null, solved = false;
+
+function load(i) {
+  index = Math.max(0, Math.min(LEVELS.length - 1, i));
+  level = parseLevel(LEVELS[index]);
+  paths = {};
+  history = [];
+  ghost = null;
+  store.set({ ...store.get(), level: index });
+  $('sub').textContent = `Level ${index + 1}/${LEVELS.length}`;
+  $('prev').disabled = index === 0;
+  $('next').disabled = index === LEVELS.length - 1;
+  render();
+}
+
+const center = n => [n.c * SZ + SZ / 2, n.r * SZ + SZ / 2];
+
+function shapeSvg(shape, x, y, rad, fill, stroke) {
+  const attrs = `fill="${fill}" stroke="${stroke}" stroke-width="4" stroke-linejoin="round"`;
+  if (shape === 't') return `<polygon points="${x},${y - rad} ${x + rad * 0.95},${y + rad * 0.7} ${x - rad * 0.95},${y + rad * 0.7}" ${attrs}/>`;
+  if (shape === 's') return `<rect x="${x - rad * 0.78}" y="${y - rad * 0.78}" width="${rad * 1.56}" height="${rad * 1.56}" rx="4" ${attrs}/>`;
+  return `<polygon points="${x},${y - rad} ${x + rad},${y} ${x},${y + rad} ${x - rad},${y}" ${attrs}/>`;
+}
+
+function render() {
+  const use = usage(level, paths);
+  solved = isSolved(level, paths);
+  board.setAttribute('viewBox', `0 0 ${level.w * SZ} ${level.h * SZ}`);
+  let out = '';
+  const line = (p, color, width, opacity) => {
+    if (p.length < 2) return '';
+    const pts = p.map(i => center(level.nodes[i]).join(',')).join(' ');
+    return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}"/>`;
+  };
+  if (ghost) for (const shape in ghost) out += line(ghost[shape], '#ffffff', 6, 0.35);
+  for (const shape in paths) out += line(paths[shape], COLORS[shape], 12, 1);
+
+  level.nodes.forEach((n, i) => {
+    const [x, y] = center(n);
+    if (n.grey) {
+      const left = n.need - (use.grey.get(i) || 0);
+      const pts = Array.from({ length: 8 }, (_, k) => {
+        const a = Math.PI / 8 + k * Math.PI / 4;
+        return `${x + Math.cos(a) * R},${y + Math.sin(a) * R}`;
+      }).join(' ');
+      out += `<polygon points="${pts}" fill="${left ? '#5b6278' : '#3a4052'}" stroke="#8790a8" stroke-width="3"/>`;
+      if (left) out += `<text x="${x}" y="${y + 7}" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">${left}</text>`;
+      return;
+    }
+    const color = COLORS[n.shape];
+    const visited = (paths[n.shape] || []).includes(i);
+    const fill = n.terminal ? color : (visited ? color : '#1d2333');
+    out += shapeSvg(n.shape, x, y, R, fill, color);
+    if (n.terminal) out += `<circle cx="${x}" cy="${y + (n.shape === 't' ? 4 : 0)}" r="5" fill="#1d2333"/>`;
+  });
+  board.innerHTML = out;
+  $('undo').disabled = history.length === 0;
+  $('hint').disabled = solved;
+  $('solved').classList.toggle('show', solved);
+}
+
+// ---------------------------------------------------------------------------
+// Thao tác: nhấn đầu mút để bắt đầu, nhấn nút giữa đường để cắt ngắn, kéo qua nút để nối
+// ---------------------------------------------------------------------------
+function nodeAt(ev, radius = 0.42) {
+  const rect = board.getBoundingClientRect();
+  const vb = board.viewBox.baseVal;
+  const x = (ev.clientX - rect.left) / rect.width * vb.width;
+  const y = (ev.clientY - rect.top) / rect.height * vb.height;
+  const c = Math.floor(x / SZ), r = Math.floor(y / SZ);
+  if (r < 0 || c < 0 || r >= level.h || c >= level.w) return -1;
+  const i = level.at[r][c];
+  if (i < 0) return -1;
+  const [cx, cy] = center(level.nodes[i]);
+  return Math.hypot(x - cx, y - cy) <= SZ * radius ? i : -1;
+}
+
+board.addEventListener('pointerdown', ev => {
+  if (solved) return;
+  const i = nodeAt(ev, 0.5);
+  if (i < 0) return;
+  const n = level.nodes[i];
+  strokeStart = JSON.stringify(paths);
+  active = null;
+  if (n.grey) {
+    active = level.shapes.find(s => paths[s] && paths[s][paths[s].length - 1] === i) || null;
+  } else {
+    const p = paths[n.shape];
+    const at = p ? p.indexOf(i) : -1;
+    if (at >= 0) { paths[n.shape] = p.slice(0, at + 1); active = n.shape; }
+    else if (n.terminal) { paths[n.shape] = [i]; active = n.shape; }
+  }
+  if (active) { board.setPointerCapture(ev.pointerId); ghost = null; render(); }
+});
+
+board.addEventListener('pointermove', ev => {
+  if (!active) return;
+  const i = nodeAt(ev);
+  const p = paths[active];
+  if (i < 0 || i === p[p.length - 1]) return;
+  if (p.length >= 2 && i === p[p.length - 2]) { p.pop(); render(); return; }
+  if (canStep(level, paths, active, i, usage(level, paths))) { p.push(i); render(); }
+});
+
+function endStroke() {
+  if (!active) return;
+  for (const s of level.shapes) if (paths[s] && paths[s].length < 2) delete paths[s];
+  if (JSON.stringify(paths) !== strokeStart) history.push(strokeStart);
+  active = null;
+  render();
+}
+board.addEventListener('pointerup', endStroke);
+board.addEventListener('pointercancel', endStroke);
+
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 2200);
+}
+
+$('undo').onclick = () => { if (history.length) { paths = JSON.parse(history.pop()); render(); } };
+$('reset').onclick = () => { if (Object.keys(paths).length) { history.push(JSON.stringify(paths)); paths = {}; render(); } };
+$('hint').onclick = () => {
+  const [solution] = solve(level, 1);
+  const shape = level.shapes.find(s => JSON.stringify(paths[s]) !== JSON.stringify(solution[s]));
+  if (!shape) return;
+  ghost = { [shape]: solution[shape] };
+  toast('Đường mờ là một cách nối đúng cho một loại hình');
+  render();
+  setTimeout(() => { ghost = null; render(); }, 2500);
+};
+$('prev').onclick = () => load(index - 1);
+$('next').onclick = () => load(index + 1);
+$('continue').onclick = () => { if (index < LEVELS.length - 1) load(index + 1); else toast('Hết level mẫu!'); };
+
+load(store.get().level || 0);
+</script>
+</body>
+</html>

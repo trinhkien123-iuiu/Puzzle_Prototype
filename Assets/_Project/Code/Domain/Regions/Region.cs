@@ -5,7 +5,8 @@ using Puzzle.Domain.Shapes;
 namespace Puzzle.Domain.Regions
 {
     /// <summary>
-    /// Một vùng: tập ô liên thông không bị ranh giới chia cắt. Chỉ đọc, do <see cref="RegionMap"/> tạo ra.
+    /// Một vùng: tập ô người chơi đã gộp với nhau (nối bằng cạnh Joined). Ô chưa gộp là vùng một ô.
+    /// Chỉ đọc, do <see cref="RegionMap"/> tạo ra.
     /// </summary>
     public sealed class Region
     {
@@ -20,21 +21,22 @@ namespace Puzzle.Domain.Regions
         public int Area => _cells.Length;
 
         /// <summary>
-        /// Số cạnh Unknown nằm bên trong vùng. Lớn hơn 0 nghĩa là người chơi còn có thể
-        /// cắt vùng này ra, nên luật nên coi lỗi về hình/diện tích là "chưa xong" thay vì "sai".
+        /// Số cạnh Unknown trên đường bao của vùng. Lớn hơn 0 nghĩa là vùng còn có thể gộp thêm ô,
+        /// nên luật nên coi vùng còn nhỏ hoặc thiếu hình là "chưa xong" thay vì "sai".
         /// </summary>
-        public int UnknownInnerEdges { get; }
+        public int OpenSides { get; }
 
-        public bool IsSettled => UnknownInnerEdges == 0;
+        /// <summary>Đường bao toàn là ranh giới hoặc mép bàn: vùng không thể lớn thêm.</summary>
+        public bool IsClosed => OpenSides == 0;
 
         /// <summary>Hình của vùng; tính khi cần lần đầu vì không phải luật nào cũng dùng.</summary>
         public Polyomino Shape => _shape ??= new Polyomino(_cells);
 
-        internal Region(int id, Cell[] cells, int unknownInnerEdges)
+        internal Region(int id, Cell[] cells, int openSides)
         {
             Id = id;
             _cells = cells;
-            UnknownInnerEdges = unknownInnerEdges;
+            OpenSides = openSides;
         }
     }
 }

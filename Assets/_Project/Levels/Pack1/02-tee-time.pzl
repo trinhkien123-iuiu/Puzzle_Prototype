@@ -1,0 +1,17 @@
+// Level 2: chỉ có hình T.
+id: p1-02
+tip: Hình được xoay và lật tuỳ ý. Ô khuyết không thuộc vùng nào.
+difficulty: 1
+
+shape T
+###
+.#.
+
+rule shape-bank T
+
+solution
+.AAA
+B.AC
+BBCC
+BD.C
+DDD.

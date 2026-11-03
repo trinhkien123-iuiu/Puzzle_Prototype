@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Streamline Prototype</title>
+<style>
+  :root { --bg: #e6e5d6; --panel: #d4d2c1; --text: #2d2d2b; --muted: #6f6e64; --accent: #e5197a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { display: flex; justify-content: center; }
+  #app { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px;
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); user-select: none; -webkit-user-select: none; }
+  header { display: flex; align-items: center; gap: 8px; }
+  header h1 { flex: 1; margin: 0; text-align: center; font-size: 18px; font-weight: 600; }
+  header small { display: block; font-size: 12px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .nav { width: 40px; height: 40px; border: 0; border-radius: 10px; background: var(--panel); color: var(--text); font-size: 18px; cursor: pointer; }
+  .nav:disabled { opacity: .3; cursor: default; }
+  .rule { background: var(--panel); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; }
+  #legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+  #legend span { display: inline-flex; align-items: center; gap: 5px; }
+  #legend svg { width: 18px; height: 18px; }
+  #board { width: 100%; max-height: 54vh; display: block; touch-action: none; }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .actions button { height: 46px; border: 0; border-radius: 12px; background: var(--panel); color: var(--text); font-size: 14px; cursor: pointer; }
+  .actions button:disabled { opacity: .35; cursor: default; }
+  .toast { min-height: 18px; text-align: center; font-size: 13px; color: var(--accent); }
+  .credit { margin: 0; text-align: center; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  #solved { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; transform: translateY(110%);
+    transition: transform .3s; pointer-events: none; }
+  #solved.show { transform: none; pointer-events: auto; }
+  #solved .bar { width: 100%; max-width: 480px; margin: 0 16px calc(16px + env(safe-area-inset-bottom)); padding: 12px 16px; border-radius: 14px;
+    background: #8e2bb0; color: #fff; display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+  #solved button { border: 0; border-radius: 10px; padding: 10px 16px; background: #fff; color: #6a1f84; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="nav" id="prev" aria-label="Level trước">‹</button>
+    <h1>Streamline<small id="sub"></small></h1>
+    <button class="nav" id="next" aria-label="Level sau">›</button>
+  </header>
+  <div class="rule"><b>Vuốt</b> hoặc dùng <b>phím mũi tên</b>: đầu dây trượt thẳng tới khi gặp tường, mép bàn hoặc chính sợi dây, để lại vệt phía sau. Đưa đầu dây tới ô <b>tím</b>.</div>
+  <div id="legend"></div>
+  <svg id="board"></svg>
+  <div class="toast" id="toast"></div>
+  <div class="actions">
+    <button id="undo">Hoàn tác</button>
+    <button id="reset">Chơi lại</button>
+    <button id="hint">Gợi ý</button>
+  </div>
+  <p class="credit">Prototype dựng lại cơ chế cốt lõi của <i>Streamline</i> (François van Niekerk). Các ô đặc biệt và level do prototype tự thiết kế.</p>
+</div>
+<div id="solved"><div class="bar"><span>Hoàn thành ✓</span><button id="continue">Tiếp tục</button></div></div>
+
+<script>
+'use strict';
+// ==LOGIC==
+// Ký hiệu: S = đầu dây, s = đầu dây thứ hai (cùng di chuyển), G = đích, # = tường, . = trống,
+// o = ô dừng, ^ v < > = ô đổi hướng, O / Q = cặp cổng dịch chuyển, k = công tắc, L = khoá (mở khi đi qua công tắc)
+const LEVELS = [
+  { rows: ['....G', '.#...', 'S....'] },
+  { rows: ['....', '..G.', '..#.', '#S..'] },
+  { rows: ['.S...', '.#G..', '..#..', '#....', '...#.'] },
+  { rows: ['.....', '..#G.', '..o..', '.o.#.', '..#S.'] },
+  { rows: ['..v..', '..#G.', '#.#..', '....>', 'S....', '.....'] },
+  { rows: ['O...S', '.....', '#....', '.O#..', '.G#.#', '.....'] },
+  { rows: ['....#', '..#..', '.kS.L', '..#..', '..G#L', '.....'] },
+  { rows: ['..#..', '.G#..', '.#...', '...#.', '#....', '..S..'] },
+  { rows: ['S.s..', '.GG..', '.#...', '.....', '..#.#'] },
+  { rows: ['S...#.', '....O.', '#GoO..', '......', '.#..#.', '.>....'] },
+];
+
+const DIRS = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
+const FORCE = { '^': 'up', 'v': 'down', '<': 'left', '>': 'right' };
+
+function parseLevel(def) {
+  const rows = def.rows;
+  const level = { h: rows.length, w: rows[0].length, tiles: [], starts: [], partner: {} };
+  const portals = {};
+  rows.forEach((row, r) => [...row].forEach((ch, c) => {
+    const i = r * level.w + c;
+    level.tiles.push(ch);
+    if (ch === 'S') level.starts[0] = i;
+    if (ch === 's') level.starts[1] = i;
+    if (ch === 'O' || ch === 'Q') (portals[ch] = portals[ch] || []).push(i);
+  }));
+  for (const k in portals) { const [a, b] = portals[k]; level.partner[a] = b; level.partner[b] = a; }
+  return level;
+}
+
+function initialState(level) {
+  const trail = new Uint8Array(level.tiles.length);
+  for (const i of level.starts) trail[i] = 1;
+  return { heads: level.starts.map(i => ({ pos: i, done: false })), trail, open: false, lines: level.starts.map(i => [[i]]) };
+}
+
+function cloneState(s) {
+  return { heads: s.heads.map(h => ({ ...h })), trail: s.trail.slice(), open: s.open, lines: s.lines.map(ls => ls.map(l => l.slice())) };
+}
+
+function stepFrom(level, i, dir) {
+  const r = Math.floor(i / level.w) + DIRS[dir][0], c = i % level.w + DIRS[dir][1];
+  return r < 0 || c < 0 || r >= level.h || c >= level.w ? -1 : r * level.w + c;
+}
+
+function isBlocked(level, s, i) {
+  const t = level.tiles[i];
+  return t === '#' || (t === 'L' && !s.open) || s.trail[i] === 1 || s.heads.some(h => h.pos === i);
+}
+
+// Một lần vuốt: mọi đầu dây chưa tới đích cùng trượt từng ô một (cùng nhịp) cho tới khi tất cả dừng.
+// Trả null nếu không đầu nào nhúc nhích. `frames` là trạng thái sau từng nhịp, để vẽ hiệu ứng trượt.
+function move(level, state, dir) {
+  const s = cloneState(state);
+  const movers = s.heads.map(h => ({ dir, moving: !h.done }));
+  const frames = [];
+  for (let tick = 0; tick < 400; tick++) {
+    const targets = movers.map((m, k) => m.moving ? stepFrom(level, s.heads[k].pos, m.dir) : -1);
+    movers.forEach((m, k) => {
+      if (!m.moving) return;
+      const t = targets[k];
+      const clash = targets.some((o, j) => j !== k && o === t);
+      if (t < 0 || clash || isBlocked(level, s, t)) { m.moving = false; targets[k] = -1; }
+    });
+    if (!movers.some(m => m.moving)) break;
+    movers.forEach((m, k) => { if (m.moving) enter(level, s, k, m, targets[k]); });
+    frames.push(cloneState(s));
+  }
+  return frames.length ? { state: s, frames } : null;
+}
+
+function enter(level, s, k, mover, i) {
+  const head = s.heads[k], tile = level.tiles[i], lines = s.lines[k];
+  head.pos = i;
+  lines[lines.length - 1].push(i);
+  if (level.partner[i] !== undefined) {         // cổng: không để lại vệt, hiện ra ở cổng kia và trượt tiếp
+    head.pos = level.partner[i];
+    lines.push([head.pos]);
+    return;
+  }
+  s.trail[i] = 1;
+  if (tile === 'G') { head.done = true; mover.moving = false; }
+  else if (tile === 'o') mover.moving = false;
+  else if (FORCE[tile]) mover.dir = FORCE[tile];
+  else if (tile === 'k') s.open = true;
+}
+
+const isWon = s => s.heads.every(h => h.done);
+
+function stateKey(s) {
+  return s.heads.map(h => h.pos + (h.done ? '!' : '')).join(',') + (s.open ? 'o' : '') + '|' + s.trail.join('');
+}
+
+// BFS tìm chuỗi vuốt ngắn nhất từ trạng thái cho trước; null nếu không còn cách thắng.
+function solve(level, start, maxNodes = 200000) {
+  const queue = [{ s: start, path: [] }], seen = new Set([stateKey(start)]);
+  for (let q = 0; q < queue.length && seen.size < maxNodes; q++) {
+    const { s, path } = queue[q];
+    for (const dir in DIRS) {
+      const res = move(level, s, dir);
+      if (!res) continue;
+      const next = path.concat(dir);
+      if (isWon(res.state)) return next;
+      const key = stateKey(res.state);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push({ s: res.state, path: next });
+    }
+  }
+  return null;
+}
+// ==/LOGIC==
+
+// ---------------------------------------------------------------------------
+// Giao diện
+// ---------------------------------------------------------------------------
+const SZ = 60, GAP = 5;
+const LINE_COLORS = ['#e5197a', '#1a9fd6'];
+const ARROWS = { up: '↑', down: '↓', left: '←', right: '→' };
+const $ = id => document.getElementById(id);
+const board = $('board');
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem('streamline-proto')) || {}; } catch (e) { return {}; } },
+  set(v) { try { localStorage.setItem('streamline-proto', JSON.stringify(v)); } catch (e) { /* bỏ qua */ } },
+};
+
+let index = 0, level, state, history, animating = false, solved = false;
+
+function load(i) {
+  index = Math.max(0, Math.min(LEVELS.length - 1, i));
+  level = parseLevel(LEVELS[index]);
+  state = initialState(level);
+  history = [];
+  store.set({ ...store.get(), level: index });
+  $('sub').textContent = `Level ${index + 1}/${LEVELS.length}`;
+  $('prev').disabled = index === 0;
+  $('next').disabled = index === LEVELS.length - 1;
+  renderLegend();
+  render(state);
+}
+
+const xy = i => [(i % level.w) * SZ, Math.floor(i / level.w) * SZ];
+
+function tileSvg(tile, x, y, open) {
+  const s = SZ - 2 * GAP, cx = x + SZ / 2, cy = y + SZ / 2;
+  const box = (fill, extra = '') => `<rect x="${x + GAP}" y="${y + GAP}" width="${s}" height="${s}" rx="7" fill="${fill}" ${extra}/>`;
+  switch (tile) {
+    case '#': return box('#2d2d2b');
+    case 'G': return box('#8e2bb0') + `<circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="10 5"/>`;
+    case 'o': return box('#b9b7a5') + `<circle cx="${cx}" cy="${cy}" r="11" fill="none" stroke="#2d2d2b" stroke-width="4"/>`;
+    case 'k': return box('#b9b7a5') + `<circle cx="${cx}" cy="${cy}" r="8" fill="#f2b705" stroke="#2d2d2b" stroke-width="3"/>`;
+    case 'L': return open
+      ? box('#b9b7a5', 'stroke="#2d2d2b" stroke-width="2" stroke-dasharray="5 4"')
+      : box('#6e6c60') + `<rect x="${cx - 9}" y="${cy - 3}" width="18" height="14" rx="3" fill="#f2b705"/><path d="M${cx - 5},${cy - 3}v-5a5,5 0 0 1 10,0v5" fill="none" stroke="#f2b705" stroke-width="3"/>`;
+    case 'O': case 'Q': {
+      const color = tile === 'O' ? '#18a999' : '#f07f2a';
+      return box('#b9b7a5') + `<circle cx="${cx}" cy="${cy}" r="15" fill="none" stroke="${color}" stroke-width="5"/><circle cx="${cx}" cy="${cy}" r="6" fill="${color}"/>`;
+    }
+    default:
+      if (FORCE[tile]) {
+        const rot = { up: 0, right: 90, down: 180, left: 270 }[FORCE[tile]];
+        return box('#b9b7a5') + `<path d="M${cx},${cy - 13} l11,12 h-7 v12 h-8 v-12 h-7z" fill="#2d2d2b" transform="rotate(${rot} ${cx} ${cy})"/>`;
+      }
+      return box('#b9b7a5');
+  }
+}
+
+function renderLegend() {
+  const used = new Set(level.tiles);
+  const items = [['o', 'Ô dừng: đầu dây dừng lại ở đây'], ['>', 'Đổi hướng trượt'], ['O', 'Cổng: chui vào cổng này, ra ở cổng cùng màu'],
+    ['k', 'Công tắc: mở mọi khoá'], ['L', 'Khoá']];
+  const shown = items.filter(([t]) => used.has(t) || (t === '>' && ['^', 'v', '<'].some(a => used.has(a))) || (t === 'O' && used.has('Q')));
+  let html = shown.map(([t, label]) => `<span><svg viewBox="0 0 ${SZ} ${SZ}">${tileSvg(t, 0, 0, false)}</svg>${label}</span>`).join('');
+  if (level.starts.length > 1) html += '<span>Hai đầu dây di chuyển cùng lúc; cả hai phải tới đích</span>';
+  $('legend').innerHTML = html;
+}
+
+function render(s) {
+  board.setAttribute('viewBox', `0 0 ${level.w * SZ} ${level.h * SZ}`);
+  let out = '';
+  level.tiles.forEach((t, i) => { const [x, y] = xy(i); out += tileSvg(t === 'S' || t === 's' ? '.' : t, x, y, s.open); });
+  s.lines.forEach((lines, k) => {
+    for (const l of lines) {
+      if (l.length < 2) continue;
+      const pts = l.map(i => xy(i).map(v => v + SZ / 2).join(',')).join(' ');
+      out += `<polyline points="${pts}" fill="none" stroke="${LINE_COLORS[k]}" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+  });
+  s.heads.forEach((h, k) => {
+    const [x, y] = xy(h.pos);
+    out += `<rect x="${x + 15}" y="${y + 15}" width="${SZ - 30}" height="${SZ - 30}" rx="5" fill="${LINE_COLORS[k]}" stroke="#fff" stroke-width="${h.done ? 3 : 0}"/>`;
+  });
+  board.innerHTML = out;
+  solved = isWon(s);
+  $('undo').disabled = history.length === 0 || animating;
+  $('hint').disabled = solved;
+  $('solved').classList.toggle('show', solved);
+}
+
+function play(dir) {
+  if (animating || solved) return;
+  const res = move(level, state, dir);
+  if (!res) return;
+  history.push(state);
+  state = res.state;
+  animating = true;
+  let f = 0;
+  const tick = () => {
+    render(res.frames[f]);
+    if (++f < res.frames.length) setTimeout(tick, 32);
+    else {
+      animating = false;
+      render(state);
+      if (!isWon(state) && !Object.keys(DIRS).some(d => move(level, state, d))) toast('Kẹt rồi! Hoàn tác hoặc chơi lại.');
+    }
+  };
+  tick();
+}
+
+// ---------------------------------------------------------------------------
+// Thao tác: phím mũi tên / WASD, vuốt trên bàn
+// ---------------------------------------------------------------------------
+const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right' };
+document.addEventListener('keydown', ev => {
+  if (KEYS[ev.key]) { ev.preventDefault(); play(KEYS[ev.key]); }
+  else if (ev.key === 'z' || ev.key === 'Backspace') $('undo').click();
+});
+
+let swipe = null;
+board.addEventListener('pointerdown', ev => { swipe = { x: ev.clientX, y: ev.clientY }; board.setPointerCapture(ev.pointerId); });
+board.addEventListener('pointermove', ev => {
+  if (!swipe) return;
+  const dx = ev.clientX - swipe.x, dy = ev.clientY - swipe.y;
+  if (Math.hypot(dx, dy) < 24) return;
+  swipe = null;
+  play(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+});
+board.addEventListener('pointerup', () => { swipe = null; });
+board.addEventListener('pointercancel', () => { swipe = null; });
+
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 2400);
+}
+
+$('undo').onclick = () => { if (!animating && history.length) { state = history.pop(); render(state); } };
+$('reset').onclick = () => { if (animating || !history.length) return; history.push(state); state = initialState(level); render(state); };
+$('hint').onclick = () => {
+  if (animating) return;
+  const path = solve(level, state);
+  if (!path) { toast('Từ đây không tới được đích, hãy hoàn tác.'); return; }
+  toast(`Bước tiếp theo: ${ARROWS[path[0]]}  (còn ${path.length} lần vuốt)`);
+};
+$('prev').onclick = () => load(index - 1);
+$('next').onclick = () => load(index + 1);
+$('continue').onclick = () => { if (index < LEVELS.length - 1) load(index + 1); else toast('Hết level mẫu!'); };
+
+load(store.get().level || 0);
+</script>
+</body>
+</html>

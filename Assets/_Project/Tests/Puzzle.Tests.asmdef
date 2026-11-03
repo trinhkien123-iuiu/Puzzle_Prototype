@@ -5,7 +5,8 @@
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "Puzzle.Domain",
-        "Puzzle.Application"
+        "Puzzle.Application",
+        "Puzzle.Presentation"
     ],
     "includePlatforms": [
         "Editor"

@@ -1,0 +1,22 @@
+// Level 4: hình S và L.
+id: p1-04
+tip: Chạm vào khe giữa hai ô để đặt ranh giới đánh dấu chỗ chắc chắn tách.
+difficulty: 2
+
+shape S
+.##
+##.
+
+shape L
+#.
+#.
+##
+
+rule shape-bank S L
+
+solution
+AAABB
+A.CCB
+.CCDB
+EE.D.
+.EEDD

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Cardinal Chains Prototype</title>
+<style>
+  :root { --bg: #f1efe9; --panel: #e2ded3; --text: #2b2a28; --muted: #77736a; --accent: #c2412d; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { display: flex; justify-content: center; }
+  #app { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px;
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); user-select: none; -webkit-user-select: none; }
+  header { display: flex; align-items: center; gap: 8px; }
+  header h1 { flex: 1; margin: 0; text-align: center; font-size: 18px; font-weight: 700; }
+  header small { display: block; font-size: 12px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .nav { width: 40px; height: 40px; border: 0; border-radius: 10px; background: var(--panel); color: var(--text); font-size: 18px; cursor: pointer; }
+  .nav:disabled { opacity: .3; cursor: default; }
+  .rule { background: var(--panel); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; }
+  #board { width: 100%; max-height: 58vh; display: block; touch-action: none; }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .actions button { height: 46px; border: 0; border-radius: 12px; background: var(--panel); color: var(--text); font-size: 14px; cursor: pointer; }
+  .actions button:disabled { opacity: .35; cursor: default; }
+  .toast { min-height: 18px; text-align: center; font-size: 13px; color: var(--accent); }
+  .credit { margin: 0; text-align: center; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  #solved { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; transform: translateY(110%);
+    transition: transform .3s; pointer-events: none; }
+  #solved.show { transform: none; pointer-events: auto; }
+  #solved .bar { width: 100%; max-width: 480px; margin: 0 16px calc(16px + env(safe-area-inset-bottom)); padding: 12px 16px; border-radius: 14px;
+    background: #2b2a28; color: #fff; display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+  #solved button { border: 0; border-radius: 10px; padding: 10px 16px; background: #fff; color: #2b2a28; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="nav" id="prev" aria-label="Level trước">‹</button>
+    <h1>Cardinal Chains<small id="sub"></small></h1>
+    <button class="nav" id="next" aria-label="Level sau">›</button>
+  </header>
+  <div class="rule">Kéo chuỗi từ ô <b>✕ màu</b> theo 4 hướng. Mỗi bước chỉ được sang ô có số <b>bằng hoặc lớn hơn</b> ô trước.
+    Lấp kín mọi ô số. Kéo ngược để rút chuỗi lại, nhấn vào giữa chuỗi để cắt ngắn.</div>
+  <svg id="board"></svg>
+  <div class="toast" id="toast"></div>
+  <div class="actions">
+    <button id="undo">Hoàn tác</button>
+    <button id="reset">Chơi lại</button>
+    <button id="hint">Gợi ý</button>
+  </div>
+  <p class="credit">Prototype dựng lại cơ chế của <i>Cardinal Chains</i> (Daniel Nora). Level tự sinh, mỗi level có đúng một lời giải.</p>
+</div>
+<div id="solved"><div class="bar"><span>Hoàn thành ✓</span><button id="continue">Tiếp tục</button></div></div>
+
+<script>
+'use strict';
+// ==LOGIC==
+// Ký hiệu: A/B/C = ô bắt đầu của chuỗi (✕), 1-9 = ô số, . = không có ô
+const LEVELS = [
+  ['A12', '543'],
+  ['322', '3A2', '444'],
+  ['114', '2A4', '223'],
+  ['5221', '52.A', '5345', '5555'],
+  ['43.5', '52A5', '5225', '5555'],
+  ['5555', '4325', '2A25', '3B25'],
+  ['3321', '4111', '4B12', '44A2'],
+  ['22A44', '23444', 'B1124', '65325', '.4366'],
+];
+
+function parseLevel(rows) {
+  const level = { h: rows.length, w: rows[0].length, cells: [], at: [], chains: [] };
+  rows.forEach((row, r) => {
+    level.at.push([]);
+    [...row].forEach((ch, c) => {
+      if (ch === '.') { level.at[r].push(-1); return; }
+      const cell = { r, c, value: /\d/.test(ch) ? +ch : 0, start: /[A-Z]/.test(ch) ? ch : null };
+      level.at[r].push(level.cells.length);
+      if (cell.start) level.chains.push({ id: ch, start: level.cells.length });
+      level.cells.push(cell);
+    });
+  });
+  level.chains.sort((a, b) => a.id.localeCompare(b.id));
+  return level;
+}
+
+function neighbours(level, i) {
+  const { r, c } = level.cells[i], out = [];
+  for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+    const nr = r + dr, nc = c + dc;
+    if (nr >= 0 && nc >= 0 && nr < level.h && nc < level.w && level.at[nr][nc] >= 0) out.push(level.at[nr][nc]);
+  }
+  return out;
+}
+
+function ownerOf(chains, i) {
+  for (const id in chains) if (chains[id].includes(i)) return id;
+  return null;
+}
+
+function canStep(level, chains, id, to) {
+  const chain = chains[id];
+  const tip = chain[chain.length - 1];
+  const cell = level.cells[to];
+  if (cell.start || ownerOf(chains, to)) return false;
+  if (!neighbours(level, tip).includes(to)) return false;
+  return cell.value >= level.cells[tip].value;
+}
+
+function isSolved(level, chains) {
+  return level.cells.every((cell, i) => cell.start || ownerOf(chains, i));
+}
+
+function newChains(level) {
+  const chains = {};
+  for (const ch of level.chains) chains[ch.id] = [ch.start];
+  return chains;
+}
+
+// Quay lui lần lượt từng chuỗi. Mỗi lần gọi go(k) ứng với một độ dài của chuỗi k:
+// hoặc dừng chuỗi k ở đây và sang chuỗi sau, hoặc kéo dài thêm một ô.
+function solve(level, limit = 1) {
+  const chains = newChains(level), solutions = [];
+  const total = level.cells.filter(c => !c.start).length;
+  let covered = 0;
+  const go = k => {
+    if (solutions.length >= limit) return;
+    if (k === level.chains.length) {
+      if (covered === total) solutions.push(JSON.parse(JSON.stringify(chains)));
+      return;
+    }
+    go(k + 1);
+    const id = level.chains[k].id, chain = chains[id];
+    for (const to of neighbours(level, chain[chain.length - 1])) {
+      if (!canStep(level, chains, id, to)) continue;
+      chain.push(to); covered++;
+      go(k);
+      chain.pop(); covered--;
+    }
+  };
+  go(0);
+  return solutions;
+}
+// ==/LOGIC==
+
+// ---------------------------------------------------------------------------
+// Giao diện
+// ---------------------------------------------------------------------------
+const COLORS = { A: '#d9452f', B: '#2f7fd9', C: '#e0a224', D: '#3aa35b' };
+const SZ = 80;
+const $ = id => document.getElementById(id);
+const board = $('board');
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem('cchains-proto')) || {}; } catch (e) { return {}; } },
+  set(v) { try { localStorage.setItem('cchains-proto', JSON.stringify(v)); } catch (e) { /* bỏ qua */ } },
+};
+
+let index = 0, level, chains, history, active = null, strokeStart = null, ghost = null, solved = false;
+
+function load(i) {
+  index = Math.max(0, Math.min(LEVELS.length - 1, i));
+  level = parseLevel(LEVELS[index]);
+  chains = newChains(level);
+  history = [];
+  ghost = null;
+  store.set({ ...store.get(), level: index });
+  $('sub').textContent = `Level ${index + 1}/${LEVELS.length}`;
+  $('prev').disabled = index === 0;
+  $('next').disabled = index === LEVELS.length - 1;
+  render();
+}
+
+const center = i => [level.cells[i].c * SZ + SZ / 2, level.cells[i].r * SZ + SZ / 2];
+
+function render() {
+  solved = isSolved(level, chains);
+  board.setAttribute('viewBox', `-4 -4 ${level.w * SZ + 8} ${level.h * SZ + 8}`);
+  let out = '';
+  level.cells.forEach((cell, i) => {
+    const owner = ownerOf(chains, i);
+    const fill = cell.start ? COLORS[cell.start] : owner ? COLORS[owner] : '#ffffff';
+    out += `<rect x="${cell.c * SZ + 3}" y="${cell.r * SZ + 3}" width="${SZ - 6}" height="${SZ - 6}" rx="10" fill="${fill}" stroke="#d8d3c6" stroke-width="${owner || cell.start ? 0 : 2}"/>`;
+  });
+  const line = (ids, color, width, opacity) => {
+    if (ids.length < 2) return '';
+    const pts = ids.map(i => center(i).join(',')).join(' ');
+    return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}"/>`;
+  };
+  for (const id in chains) out += line(chains[id], '#ffffff', 8, 0.55);
+  if (ghost) out += line(ghost.cells, COLORS[ghost.id], 10, 0.85);
+  level.cells.forEach((cell, i) => {
+    const [x, y] = center(i);
+    const owner = ownerOf(chains, i);
+    if (cell.start) {
+      out += `<path d="M${x - 13},${y - 13}L${x + 13},${y + 13}M${x + 13},${y - 13}L${x - 13},${y + 13}" stroke="#fff" stroke-width="7" stroke-linecap="round"/>`;
+    } else {
+      out += `<text x="${x}" y="${y + 11}" text-anchor="middle" font-size="32" font-weight="700" fill="${owner ? '#fff' : '#2b2a28'}">${cell.value}</text>`;
+    }
+  });
+  board.innerHTML = out;
+  $('undo').disabled = history.length === 0;
+  $('hint').disabled = solved;
+  $('solved').classList.toggle('show', solved);
+}
+
+// ---------------------------------------------------------------------------
+// Thao tác
+// ---------------------------------------------------------------------------
+function cellAt(ev) {
+  const rect = board.getBoundingClientRect();
+  const vb = board.viewBox.baseVal;
+  const x = (ev.clientX - rect.left) / rect.width * vb.width + vb.x;
+  const y = (ev.clientY - rect.top) / rect.height * vb.height + vb.y;
+  const c = Math.floor(x / SZ), r = Math.floor(y / SZ);
+  return r < 0 || c < 0 || r >= level.h || c >= level.w ? -1 : level.at[r][c];
+}
+
+board.addEventListener('pointerdown', ev => {
+  if (solved) return;
+  const i = cellAt(ev);
+  if (i < 0) return;
+  const id = level.cells[i].start || ownerOf(chains, i);
+  if (!id) return;
+  strokeStart = JSON.stringify(chains);
+  chains[id] = chains[id].slice(0, chains[id].indexOf(i) + 1);
+  active = id;
+  ghost = null;
+  board.setPointerCapture(ev.pointerId);
+  render();
+});
+
+board.addEventListener('pointermove', ev => {
+  if (!active) return;
+  const target = cellAt(ev);
+  const chain = chains[active];
+  if (target < 0 || target === chain[chain.length - 1]) return;
+  if (chain.length >= 2 && target === chain[chain.length - 2]) { chain.pop(); render(); return; }
+  // Ngón lướt nhanh qua nhiều ô cùng hàng/cột: bước từng ô về phía đó.
+  const T = level.cells[target];
+  for (let guard = 0; guard < 12; guard++) {
+    const tip = level.cells[chain[chain.length - 1]];
+    if (tip.r !== T.r && tip.c !== T.c) break;
+    if (tip.r === T.r && tip.c === T.c) break;
+    const nr = tip.r + Math.sign(T.r - tip.r), nc = tip.c + Math.sign(T.c - tip.c);
+    const next = level.at[nr][nc];
+    if (next < 0 || !canStep(level, chains, active, next)) break;
+    chain.push(next);
+  }
+  render();
+});
+
+function endStroke() {
+  if (!active) return;
+  if (JSON.stringify(chains) !== strokeStart) history.push(strokeStart);
+  active = null;
+  render();
+}
+board.addEventListener('pointerup', endStroke);
+board.addEventListener('pointercancel', endStroke);
+
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 2200);
+}
+
+$('undo').onclick = () => { if (history.length) { chains = JSON.parse(history.pop()); render(); } };
+$('reset').onclick = () => {
+  const fresh = newChains(level);
+  if (JSON.stringify(fresh) === JSON.stringify(chains)) return;
+  history.push(JSON.stringify(chains));
+  chains = fresh;
+  render();
+};
+// Gợi ý: chuỗi đầu tiên đang lệch lời giải được vẽ mờ tới hết.
+$('hint').onclick = () => {
+  const [solution] = solve(level, 1);
+  const id = level.chains.map(c => c.id).find(id => JSON.stringify(chains[id]) !== JSON.stringify(solution[id]));
+  if (!id) return;
+  ghost = { id, cells: solution[id] };
+  toast('Đường mờ là chuỗi đúng của một màu');
+  render();
+  setTimeout(() => { ghost = null; render(); }, 2500);
+};
+$('prev').onclick = () => load(index - 1);
+$('next').onclick = () => load(index + 1);
+$('continue').onclick = () => { if (index < LEVELS.length - 1) load(index + 1); else toast('Hết level mẫu!'); };
+
+load(store.get().level || 0);
+</script>
+</body>
+</html>

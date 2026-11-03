@@ -18,6 +18,15 @@ namespace Puzzle.Application.Progress
         /// <summary>Mỗi ký tự là một cạnh theo chỉ số của BoardShape: '0' Unknown, '1' Border, '2' Joined.</summary>
         public string Edges;
 
+        /// <summary>
+        /// Mỗi ký tự là màu tô một ô theo chỉ số của BoardShape: '0' chưa tô, '1'..'9' màu trong bảng.
+        /// Bản lưu cũ không có trường này thì coi như chưa tô ô nào.
+        /// </summary>
+        public string Paint;
+
+        /// <summary>Số màu tối đa lưu được (một chữ số mỗi ô).</summary>
+        public const int MaxPaint = 9;
+
         public bool IsEmpty => string.IsNullOrEmpty(LevelId);
 
         public static SavedPuzzle Capture(string levelId, PuzzleState state)
@@ -30,7 +39,12 @@ namespace Puzzle.Application.Progress
             {
                 edges.Append((char)('0' + (int)state.GetEdge(i)));
             }
-            return new SavedPuzzle { LevelId = levelId, Edges = edges.ToString() };
+            var paint = new StringBuilder(state.Board.Cells.Count);
+            for (int i = 0; i < state.Board.Cells.Count; i++)
+            {
+                paint.Append((char)('0' + Math.Min(MaxPaint, Math.Max(0, state.GetPaint(i)))));
+            }
+            return new SavedPuzzle { LevelId = levelId, Edges = edges.ToString(), Paint = paint.ToString() };
         }
 
         /// <summary>
@@ -49,10 +63,24 @@ namespace Puzzle.Application.Progress
                 if (value < 0 || value > (int)EdgeState.Joined) return false;
                 restored.SetEdge(definition.Board.Edges[i], (EdgeState)value);
             }
+            if (!TryRestorePaint(definition, restored)) return false;
 
             // Ranh giới cho sẵn luôn thắng bản lưu, kể cả khi file lưu bị sửa tay.
             foreach (Edge given in definition.GivenBorders) restored.SetEdge(given, EdgeState.Border);
             state = restored;
+            return true;
+        }
+
+        private bool TryRestorePaint(PuzzleDefinition definition, PuzzleState restored)
+        {
+            if (string.IsNullOrEmpty(Paint)) return true;
+            if (Paint.Length != definition.Board.Cells.Count) return false;
+            for (int i = 0; i < Paint.Length; i++)
+            {
+                int value = Paint[i] - '0';
+                if (value < 0 || value > MaxPaint) return false;
+                restored.SetPaint(definition.Board.Cells[i], value);
+            }
             return true;
         }
     }

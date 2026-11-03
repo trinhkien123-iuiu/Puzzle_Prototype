@@ -17,12 +17,13 @@ namespace Puzzle.Tests.Application
             PuzzleState state = definition.CreateInitialState();
             state.SetEdge(TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Border);
             state.SetEdge(TestBoards.EdgeBetween(1, 0, 1, 1), EdgeState.Joined);
+            state.SetPaint(new Cell(1, 0), 6);
 
             SavedPuzzle saved = SavedPuzzle.Capture(LevelId, state);
             bool restored = saved.TryRestore(definition, out PuzzleState loaded);
 
             Assert.IsTrue(restored);
-            Assert.IsTrue(loaded.SameEdgesAs(state));
+            Assert.IsTrue(loaded.SameAs(state));
             Assert.IsFalse(new PuzzleSession(definition, loaded).Snapshot.CanUndo);
         }
 

@@ -70,11 +70,11 @@ namespace Puzzle.Tests.Application
         [Test]
         public void UndoOnce_RevertsAWholeDrag()
         {
-            _session.Execute(new MergeCellsCommand(_definition, TestPuzzles.Cells((0, 0), (1, 0), (1, 1), (2, 1))));
+            _session.Execute(new MergeCellsCommand(_definition, TestPuzzles.Cells((0, 0), (1, 0), (1, 1), (2, 1)), 1));
 
             _session.Undo();
 
-            Assert.IsTrue(_session.Snapshot.State.SameEdgesAs(_definition.CreateInitialState()));
+            Assert.IsTrue(_session.Snapshot.State.SameAs(_definition.CreateInitialState()));
             Assert.IsFalse(_session.Snapshot.CanUndo);
         }
 
@@ -99,11 +99,12 @@ namespace Puzzle.Tests.Application
         }
 
         [Test]
-        public void DrawingEverySolutionBorder_SolvesThePuzzle()
+        public void JoiningEveryPairOfTheSolution_SolvesThePuzzle()
         {
-            foreach (Edge edge in _definition.SolutionBorders)
+            foreach (Edge edge in _definition.Board.Edges)
             {
-                _session.Execute(new SetEdgeCommand(_definition, edge, EdgeState.Border));
+                if (_definition.SolutionStateOf(edge) != EdgeState.Joined) continue;
+                _session.Execute(new SetEdgeCommand(_definition, edge, EdgeState.Joined));
             }
 
             Assert.IsTrue(_session.Snapshot.IsSolved);

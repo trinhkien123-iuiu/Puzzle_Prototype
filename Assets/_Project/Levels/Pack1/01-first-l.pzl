@@ -1,0 +1,17 @@
+// Level 1: một hình L duy nhất, làm quen thao tác kéo gộp.
+id: p1-01
+tip: Kéo ngón qua các ô để gộp thành một vùng. Mỗi vùng phải là hình L.
+difficulty: 1
+
+shape L
+#.
+#.
+##
+
+rule shape-bank L
+
+solution
+AAA.
+BBA.
+B..C
+BCCC

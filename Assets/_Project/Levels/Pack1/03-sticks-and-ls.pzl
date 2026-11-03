@@ -1,0 +1,20 @@
+// Level 3: bank hai hình, thanh 3 ô và L.
+id: p1-03
+tip: Kho có hai hình: mỗi vùng là một trong hai.
+difficulty: 2
+
+shape L
+#.
+#.
+##
+
+shape I
+###
+
+rule shape-bank L I
+
+solution
+AABBB
+CADEB
+CADE.
+C.DEE

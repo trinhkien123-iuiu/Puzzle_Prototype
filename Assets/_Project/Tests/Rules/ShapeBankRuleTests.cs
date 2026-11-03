@@ -60,18 +60,18 @@ namespace Puzzle.Tests.Rules
         }
 
         [Test]
-        public void FreshBoard_IsIncomplete_NotBroken()
+        public void FreshBoard_EverySingleCellIsIncomplete_NotBroken()
         {
             var state = new PuzzleState(BoardShape.Rectangle(4, 2));
 
             Check(LBank(), state);
 
-            Assert.AreEqual(1, _violations.Count);
-            Assert.AreEqual(Severity.Incomplete, _violations[0].Severity);
+            Assert.AreEqual(8, _violations.Count);
+            foreach (RuleViolation violation in _violations) Assert.AreEqual(Severity.Incomplete, violation.Severity);
         }
 
         [Test]
-        public void EnclosedRegionSmallerThanEveryShape_IsBroken_EvenWithUnknownsElsewhere()
+        public void SmallRegionWalledInByBorders_IsBroken_OthersStillIncomplete()
         {
             var state = new PuzzleState(BoardShape.Rectangle(4, 2));
             state.SetEdge(TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Border);
@@ -79,19 +79,17 @@ namespace Puzzle.Tests.Rules
 
             Check(LBank(), state);
 
-            Assert.AreEqual(2, _violations.Count);
-            RuleViolation corner = _violations.Find(v => v.Cells.Count == 1);
+            RuleViolation corner = _violations.Find(v => v.Cells[0] == new Cell(0, 0));
             Assert.AreEqual(Severity.Broken, corner.Severity);
-            RuleViolation rest = _violations.Find(v => v.Cells.Count == 7);
-            Assert.AreEqual(Severity.Incomplete, rest.Severity);
+            Assert.AreEqual(7, _violations.FindAll(v => v.Severity == Severity.Incomplete).Count);
         }
 
         [Test]
-        public void CorrectRegions_WithUndecidedInnerEdges_StillPass()
+        public void CorrectRegions_DoNotNeedBordersBetweenThem()
         {
-            // Vùng đã đúng hình thì cạnh bên trong để Unknown cũng không sao.
+            // Ranh giới chỉ là đánh dấu phụ: hai vùng L đã gộp đúng thì cạnh giữa để Unknown vẫn giải xong.
             PuzzleState state = TestBoards.StateOf(TwoLs);
-            state.SetEdge(TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Unknown);
+            state.SetEdge(TestBoards.EdgeBetween(2, 0, 3, 0), EdgeState.Unknown);
 
             Check(LBank(), state);
 

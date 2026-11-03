@@ -15,7 +15,7 @@ namespace Puzzle.Domain.Rules.ShapeBank
         // Lưu dạng chính tắc của bank một lần, để mỗi lần kiểm tra chỉ là một phép tra HashSet.
         private readonly HashSet<Polyomino> _canonicalBank = new HashSet<Polyomino>();
         private readonly Polyomino[] _shapes;
-        private readonly int _minArea = int.MaxValue;
+        private readonly int _maxArea;
 
         public IReadOnlyList<Polyomino> Shapes => _shapes;
 
@@ -28,7 +28,7 @@ namespace Puzzle.Domain.Rules.ShapeBank
             foreach (Polyomino shape in _shapes)
             {
                 _canonicalBank.Add(new ShapeVariants(shape).Canonical);
-                _minArea = Math.Min(_minArea, shape.Area);
+                _maxArea = Math.Max(_maxArea, shape.Area);
             }
         }
 
@@ -41,13 +41,13 @@ namespace Puzzle.Domain.Rules.ShapeBank
             }
         }
 
-        // Vùng đã bị ranh giới bao kín thì chỉ có thể nhỏ đi khi cắt thêm, không thể lớn lên.
-        // Nên vùng nhỏ hơn hình nhỏ nhất của bank là sai chắc chắn; vùng sai hình mà còn cạnh
-        // Unknown bên trong thì người chơi vẫn cắt tiếp được, chỉ là chưa xong.
+        // Vùng chỉ có thể lớn thêm (gộp thêm ô), không tự nhỏ đi. Nên vùng đã to bằng hình lớn nhất
+        // mà vẫn sai hình, hoặc vùng không còn cạnh mở để gộp, là sai chắc chắn (phải gỡ bớt).
+        // Vùng nhỏ hơn mà còn cạnh mở thì người chơi vẫn đang gộp dở, chỉ là chưa xong.
         private Severity SeverityFor(Region region)
         {
-            if (region.Area < _minArea) return Severity.Broken;
-            return region.IsSettled ? Severity.Broken : Severity.Incomplete;
+            if (region.Area >= _maxArea) return Severity.Broken;
+            return region.IsClosed ? Severity.Broken : Severity.Incomplete;
         }
     }
 }

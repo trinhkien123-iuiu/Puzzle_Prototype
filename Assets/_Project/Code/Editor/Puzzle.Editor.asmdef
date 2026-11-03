@@ -5,7 +5,8 @@
         "Puzzle.Domain",
         "Puzzle.Application",
         "Puzzle.Presentation",
-        "Puzzle.Bootstrap"
+        "Puzzle.Bootstrap",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [
         "Editor"

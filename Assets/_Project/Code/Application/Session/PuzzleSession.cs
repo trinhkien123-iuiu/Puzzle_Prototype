@@ -43,7 +43,7 @@ namespace Puzzle.Application.Session
             // tránh một bước undo "rỗng" mà người chơi bấm không thấy gì xảy ra.
             PuzzleState before = _state.Clone();
             command.Do(_state);
-            if (_state.SameEdgesAs(before)) return false;
+            if (_state.SameAs(before)) return false;
 
             _history.Record(command);
             Publish();

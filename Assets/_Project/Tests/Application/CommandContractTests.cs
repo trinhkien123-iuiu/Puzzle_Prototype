@@ -18,11 +18,12 @@ namespace Puzzle.Tests.Application
             new Dictionary<string, Func<PuzzleDefinition, ICommand>>
             {
                 ["merge-drag"] = d => new MergeCellsCommand(d,
-                    TestPuzzles.Cells((0, 0), (1, 0), (2, 0), (3, 0), (3, 1))),
-                ["merge-across-given"] = d => new MergeCellsCommand(d, TestPuzzles.Cells((2, 0), (3, 0))),
+                    TestPuzzles.Cells((0, 0), (1, 0), (2, 0), (3, 0), (3, 1)), 2),
+                ["merge-across-given"] = d => new MergeCellsCommand(d, TestPuzzles.Cells((2, 0), (3, 0)), 3),
                 ["set-border"] = d => new SetEdgeCommand(d, TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Border),
                 ["set-joined"] = d => new SetEdgeCommand(d, TestBoards.EdgeBetween(1, 1, 2, 1), EdgeState.Joined),
                 ["clear-region"] = d => new ClearRegionCommand(d, new Cell(1, 1)),
+                ["reset-board"] = d => new ResetBoardCommand(d),
             };
 
         private static IEnumerable<string> Commands() => Factories.Keys;
@@ -47,7 +48,7 @@ namespace Puzzle.Tests.Application
             cmd.Do(state);
             cmd.Undo(state);
 
-            Assert.IsTrue(state.SameEdgesAs(original));
+            Assert.IsTrue(state.SameAs(original));
         }
 
         [Test, Combinatorial]
@@ -64,7 +65,7 @@ namespace Puzzle.Tests.Application
             cmd.Undo(state);
             cmd.Do(state);
 
-            Assert.IsTrue(state.SameEdgesAs(afterFirstDo));
+            Assert.IsTrue(state.SameAs(afterFirstDo));
         }
 
         [Test, Combinatorial]
@@ -88,6 +89,8 @@ namespace Puzzle.Tests.Application
             {
                 state.SetEdge(TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Border);
                 state.SetEdge(TestBoards.EdgeBetween(1, 0, 1, 1), EdgeState.Joined);
+                state.SetPaint(new Cell(1, 0), 4);
+                state.SetPaint(new Cell(1, 1), 4);
             }
             return state;
         }

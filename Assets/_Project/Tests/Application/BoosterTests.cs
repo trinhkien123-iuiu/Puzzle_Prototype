@@ -55,17 +55,14 @@ namespace Puzzle.Tests.Application
 
             _session.Undo();
 
-            Assert.IsTrue(_session.Snapshot.State.SameEdgesAs(_definition.CreateInitialState()));
+            Assert.IsTrue(_session.Snapshot.State.SameAs(_definition.CreateInitialState()));
         }
 
         [Test]
         public void Check_HighlightsOnlyTheRegionWithAMistake_AndChangesNothing()
         {
-            foreach (Edge edge in _definition.SolutionBorders)
-            {
-                _session.Execute(new SetEdgeCommand(_definition, edge, EdgeState.Border));
-            }
-            // Ranh giới thừa nằm trong vùng A (ô (0,0) và (1,0) cùng vùng trong lời giải).
+            _session = new PuzzleSession(_definition, _definition.CreateSolutionState());
+            // Ranh giới thừa cắt vùng A làm đôi (ô (0,0) và (1,0) cùng vùng trong lời giải).
             _session.Execute(new SetEdgeCommand(_definition, TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Border));
             PuzzleState before = _session.Snapshot.State;
 

@@ -6,8 +6,8 @@ using Puzzle.Domain.Puzzle;
 namespace Puzzle.Domain.Regions
 {
     /// <summary>
-    /// Chia bàn thành các vùng từ trạng thái cạnh. Hai ô kề nhau cùng vùng khi cạnh giữa chúng
-    /// không phải Border (Unknown cũng nối, vì người chơi chia bàn bằng cách vẽ ranh giới).
+    /// Chia bàn thành các vùng từ trạng thái cạnh. Hai ô kề nhau cùng vùng khi người chơi đã gộp chúng
+    /// (cạnh Joined); Unknown và Border đều tách. Ranh giới chỉ là đánh dấu "chắc chắn" của người chơi.
     /// Tính một lần, chỉ đọc; trạng thái đổi thì tạo RegionMap mới.
     /// </summary>
     public sealed class RegionMap
@@ -43,7 +43,7 @@ namespace Puzzle.Domain.Regions
             return id < 0 ? null : _regions[id];
         }
 
-        // Union-find trên chỉ số ô: mỗi cạnh không phải Border gộp hai tập.
+        // Union-find trên chỉ số ô: mỗi cạnh Joined gộp hai tập.
         // Bàn nhỏ (dưới vài trăm ô) nên nén đường đi là đủ, không cần hợp theo hạng.
         private int[] BuildUnionFind(PuzzleState state)
         {
@@ -53,7 +53,7 @@ namespace Puzzle.Domain.Regions
             IReadOnlyList<Edge> edges = _board.Edges;
             for (int i = 0; i < edges.Count; i++)
             {
-                if (state.GetEdge(i) == EdgeState.Border) continue;
+                if (state.GetEdge(i) != EdgeState.Joined) continue;
                 int rootA = Find(parent, _board.IndexOf(edges[i].A));
                 int rootB = Find(parent, _board.IndexOf(edges[i].B));
                 if (rootA != rootB) parent[rootB] = rootA;
@@ -84,7 +84,7 @@ namespace Puzzle.Domain.Regions
         private Region[] BuildRegions(PuzzleState state, int regionCount)
         {
             var cellsPerRegion = new List<Cell>[regionCount];
-            var unknownInner = new int[regionCount];
+            var openSides = new int[regionCount];
             for (int r = 0; r < regionCount; r++) cellsPerRegion[r] = new List<Cell>();
 
             for (int i = 0; i < _regionOfCell.Length; i++)
@@ -92,19 +92,22 @@ namespace Puzzle.Domain.Regions
                 cellsPerRegion[_regionOfCell[i]].Add(_board.Cells[i]);
             }
 
-            // Cạnh Unknown mà hai bên cùng vùng = chỗ người chơi còn có thể cắt vùng ra.
+            // Cạnh Unknown giữa hai vùng = chỗ cả hai vùng còn có thể gộp thêm ô.
             IReadOnlyList<Edge> edges = _board.Edges;
             for (int i = 0; i < edges.Count; i++)
             {
                 if (state.GetEdge(i) != EdgeState.Unknown) continue;
-                int region = _regionOfCell[_board.IndexOf(edges[i].A)];
-                if (region == _regionOfCell[_board.IndexOf(edges[i].B)]) unknownInner[region]++;
+                int regionA = _regionOfCell[_board.IndexOf(edges[i].A)];
+                int regionB = _regionOfCell[_board.IndexOf(edges[i].B)];
+                if (regionA == regionB) continue;
+                openSides[regionA]++;
+                openSides[regionB]++;
             }
 
             var regions = new Region[regionCount];
             for (int r = 0; r < regionCount; r++)
             {
-                regions[r] = new Region(r, cellsPerRegion[r].ToArray(), unknownInner[r]);
+                regions[r] = new Region(r, cellsPerRegion[r].ToArray(), openSides[r]);
             }
             return regions;
         }

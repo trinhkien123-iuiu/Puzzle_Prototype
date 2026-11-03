@@ -12,7 +12,7 @@ namespace Puzzle.Application.Commands
     {
         private readonly Edge _edge;
         private readonly EdgeState _target;
-        private readonly EdgeChangeSet _changes;
+        private readonly StateChangeSet _changes;
 
         public Edge Edge => _edge;
         public EdgeState Target => _target;
@@ -21,7 +21,7 @@ namespace Puzzle.Application.Commands
         {
             _edge = edge;
             _target = target;
-            _changes = new EdgeChangeSet(definition);
+            _changes = new StateChangeSet(definition);
         }
 
         /// <summary>Lệnh cho một lần chạm cạnh: đang là ranh giới thì xoá, chưa thì đặt.</summary>
@@ -34,7 +34,7 @@ namespace Puzzle.Application.Commands
         public void Do(PuzzleState state)
         {
             _changes.Begin();
-            _changes.Set(state, _edge, _target);
+            _changes.SetEdge(state, _edge, _target);
         }
 
         public void Undo(PuzzleState state) => _changes.Revert(state);

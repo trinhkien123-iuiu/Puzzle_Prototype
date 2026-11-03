@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Ouros Prototype</title>
+<style>
+  :root { --bg: #0d1424; --panel: #18223a; --text: #e8f1ff; --muted: #8796b3; --accent: #7fe3ff; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: radial-gradient(circle at 50% 30%, #1b2a4a, var(--bg) 70%); color: var(--text);
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { display: flex; justify-content: center; }
+  #app { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px;
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); user-select: none; -webkit-user-select: none; }
+  header { display: flex; align-items: center; gap: 8px; }
+  header h1 { flex: 1; margin: 0; text-align: center; font-size: 18px; letter-spacing: .3em; font-weight: 300; }
+  header small { display: block; font-size: 12px; color: var(--muted); letter-spacing: 0; margin-top: 2px; }
+  .nav { width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--panel); color: var(--text); font-size: 18px; cursor: pointer; }
+  .nav:disabled { opacity: .3; cursor: default; }
+  .rule { background: var(--panel); border-radius: 14px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; color: #cdd8ee; }
+  #board { width: 100%; max-height: 58vh; aspect-ratio: 1; display: block; touch-action: none; background: #0a1020; border-radius: 18px; }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .actions button { height: 46px; border: 0; border-radius: 23px; background: var(--panel); color: var(--text); font-size: 14px; cursor: pointer; }
+  .actions button:disabled { opacity: .35; cursor: default; }
+  .toast { min-height: 18px; text-align: center; font-size: 13px; color: var(--accent); }
+  .credit { margin: 0; text-align: center; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  #solved { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; transform: translateY(110%);
+    transition: transform .3s; pointer-events: none; }
+  #solved.show { transform: none; pointer-events: auto; }
+  #solved .bar { width: 100%; max-width: 480px; margin: 0 16px calc(16px + env(safe-area-inset-bottom)); padding: 12px 16px; border-radius: 16px;
+    background: #1f6f8b; border: 1px solid var(--accent); display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+  #solved button { border: 0; border-radius: 12px; padding: 10px 16px; background: #fff; color: #0d3b4d; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="nav" id="prev" aria-label="Level trước">‹</button>
+    <h1>OUROS<small id="sub"></small></h1>
+    <button class="nav" id="next" aria-label="Level sau">›</button>
+  </header>
+  <div class="rule"><b>Kéo các chấm tròn</b> để uốn vòng cong khép kín. Viên sáng chạy dọc vòng phải đi qua các mục tiêu
+    <b>theo đúng thứ tự số</b>. Chấm vuông bị ghim, không kéo được. Vòng không được chạm vùng đỏ.</div>
+  <svg id="board" viewBox="0 0 100 100"></svg>
+  <div class="toast" id="toast"></div>
+  <div class="actions">
+    <button id="undo">Hoàn tác</button>
+    <button id="reset">Chơi lại</button>
+    <button id="hint">Gợi ý</button>
+  </div>
+  <p class="credit">Prototype dựng lại ý tưởng của <i>Ouros</i> (sharkwithlasers): uốn đường cong để viên sáng đi qua mục tiêu theo thứ tự.
+    Kiểu đường cong (B-spline), vùng đỏ, điểm ghim và level do prototype tự thiết kế.</p>
+</div>
+<div id="solved"><div class="bar"><span>Hoàn thành ✓</span><button id="continue">Tiếp tục</button></div></div>
+
+<script>
+'use strict';
+// ==LOGIC==
+// Toạ độ trong khung 0..100. `sol` là vị trí điểm điều khiển của một lời giải; mục tiêu được đặt
+// trên đường cong lời giải tại tham số `targets` (0..1, theo thứ tự đi qua), nên level luôn giải được.
+const LEVELS = [
+  { start: [[12, 62], [32, 62], [22, 86]], sol: [[50, 18], [84, 78], [16, 78]], targets: [0.12] },
+  { start: [[40, 40], [60, 40], [60, 60], [40, 60]], sol: [[18, 22], [82, 22], [82, 78], [18, 78]], targets: [0.2, 0.7] },
+  { start: [[42, 42], [58, 42], [58, 58], [42, 58]], sol: [[14, 30], [80, 14], [86, 82], [24, 86]], targets: [0.05, 0.4, 0.7], avoid: [[50, 50, 9]] },
+  { start: [[22, 22], [78, 22], [78, 78], [22, 78]], sol: [[16, 16], [84, 84], [84, 16], [16, 84]], targets: [0.02, 0.27, 0.52, 0.77] },
+  { start: [[15, 50], [40, 40], [60, 40], [85, 20], [60, 60], [40, 60]], sol: [[15, 50], [30, 12], [62, 30], [85, 20], [82, 74], [38, 88]],
+    locked: [0, 3], targets: [0.12, 0.38, 0.62, 0.86], avoid: [[52, 56, 8]] },
+  { start: [[50, 15], [86.1, 41.3], [72.3, 83.7], [27.7, 83.7], [13.9, 41.3]], sol: [[50, 15], [72.3, 83.7], [13.9, 41.3], [86.1, 41.3], [27.7, 83.7]],
+    locked: [0], targets: [0, 0.2, 0.4, 0.6, 0.8], avoid: [[50, 55, 4]] },
+];
+
+const SAMPLES = 360, HIT = 3.6;
+
+// B-spline bậc 3 khép kín: đường cong mượt đi gần (không đi qua) các điểm điều khiển.
+function curvePoint(cps, t) {
+  const n = cps.length;
+  const x = ((t % 1) + 1) % 1 * n;
+  const seg = Math.floor(x), u = x - seg;
+  const p = k => cps[((seg + k) % n + n) % n];
+  const b0 = (1 - u) ** 3 / 6, b1 = (3 * u ** 3 - 6 * u ** 2 + 4) / 6, b2 = (-3 * u ** 3 + 3 * u ** 2 + 3 * u + 1) / 6, b3 = u ** 3 / 6;
+  const [P0, P1, P2, P3] = [p(-1), p(0), p(1), p(2)];
+  return [b0 * P0[0] + b1 * P1[0] + b2 * P2[0] + b3 * P3[0], b0 * P0[1] + b1 * P1[1] + b2 * P2[1] + b3 * P3[1]];
+}
+
+function sample(cps) {
+  return Array.from({ length: SAMPLES }, (_, i) => curvePoint(cps, i / SAMPLES));
+}
+
+function buildLevel(def) {
+  return {
+    start: def.start, locked: def.locked || [], avoid: def.avoid || [],
+    targets: def.targets.map(t => curvePoint(def.sol, t)), sol: def.sol,
+  };
+}
+
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+// Mục tiêu nào đang được vòng đi qua (không xét thứ tự) — để tô sáng khi chơi.
+function hitTargets(level, pts) {
+  return level.targets.map(t => pts.some(p => dist(p, t) <= HIT));
+}
+
+function touchesAvoid(level, pts) {
+  return level.avoid.some(([x, y, r]) => pts.some(p => dist(p, [x, y]) <= r));
+}
+
+// Đi một vòng từ một lần chạm mục tiêu 1, phải gặp 2, 3, ... theo thứ tự trước khi hết vòng.
+function inOrder(level, pts) {
+  const hits = level.targets.map(t => pts.map((p, i) => dist(p, t) <= HIT ? i : -1).filter(i => i >= 0));
+  if (hits.some(h => h.length === 0)) return false;
+  return hits[0].some(i0 => {
+    let d = 0;
+    for (let k = 1; k < hits.length; k++) {
+      const next = hits[k].map(i => (i - i0 + SAMPLES) % SAMPLES).filter(x => x > d).sort((a, b) => a - b)[0];
+      if (next === undefined) return false;
+      d = next;
+    }
+    return true;
+  });
+}
+
+function isSolved(level, cps) {
+  const pts = sample(cps);
+  return !touchesAvoid(level, pts) && inOrder(level, pts);
+}
+// ==/LOGIC==
+
+// ---------------------------------------------------------------------------
+// Giao diện
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const board = $('board');
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem('ouros-proto')) || {}; } catch (e) { return {}; } },
+  set(v) { try { localStorage.setItem('ouros-proto', JSON.stringify(v)); } catch (e) { /* bỏ qua */ } },
+};
+
+let index = 0, level, cps, history, drag = null, ghost = null, solved = false, orbT = 0;
+
+function load(i) {
+  index = Math.max(0, Math.min(LEVELS.length - 1, i));
+  level = buildLevel(LEVELS[index]);
+  cps = level.start.map(p => p.slice());
+  history = [];
+  ghost = null;
+  store.set({ ...store.get(), level: index });
+  $('sub').textContent = `Level ${index + 1}/${LEVELS.length}`;
+  $('prev').disabled = index === 0;
+  $('next').disabled = index === LEVELS.length - 1;
+  render();
+}
+
+function render() {
+  const pts = sample(cps);
+  const hit = hitTargets(level, pts);
+  const bad = touchesAvoid(level, pts);
+  solved = !bad && inOrder(level, pts);
+  let out = `<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.2" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <pattern id="hatch" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1.2" height="3" fill="#ff5a6e" opacity=".5"/></pattern></defs>`;
+  for (const [x, y, r] of level.avoid) {
+    out += `<circle cx="${x}" cy="${y}" r="${r}" fill="url(#hatch)" stroke="#ff5a6e" stroke-width=".6" opacity="${bad ? 1 : 0.75}"/>`;
+  }
+  out += `<polygon points="${cps.map(p => p.join(',')).join(' ')}" fill="none" stroke="#4d5f86" stroke-width=".35" stroke-dasharray="1.2 1.2"/>`;
+  const d = 'M' + pts.map(p => p.map(v => v.toFixed(2)).join(',')).join('L') + 'Z';
+  const color = solved ? '#9dffc8' : bad ? '#ff8a96' : '#7fe3ff';
+  out += `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.3" stroke-linejoin="round" filter="url(#glow)"/>`;
+  if (ghost) {
+    out += `<path d="${'M' + sample(ghost.cps).map(p => p.join(',')).join('L') + 'Z'}" fill="none" stroke="#fff" stroke-width=".6" stroke-dasharray="1.5 1.5" opacity=".5"/>`;
+    const [fx, fy] = cps[ghost.k], [tx, ty] = ghost.cps[ghost.k];
+    out += `<line x1="${fx}" y1="${fy}" x2="${tx}" y2="${ty}" stroke="#fff" stroke-width=".5" opacity=".8"/><circle cx="${tx}" cy="${ty}" r="2.6" fill="none" stroke="#fff" stroke-width=".6"/>`;
+  }
+  level.targets.forEach(([x, y], k) => {
+    out += `<circle cx="${x}" cy="${y}" r="${HIT}" fill="${hit[k] ? '#ffd76a' : 'none'}" fill-opacity="${hit[k] ? 0.35 : 0}" stroke="#ffd76a" stroke-width=".7"/>`;
+    if (level.targets.length > 1) out += `<text x="${x}" y="${y + 1.5}" text-anchor="middle" font-size="4" font-weight="700" fill="#ffd76a">${k + 1}</text>`;
+  });
+  cps.forEach(([x, y], k) => {
+    out += level.locked.includes(k)
+      ? `<rect x="${x - 2.2}" y="${y - 2.2}" width="4.4" height="4.4" fill="#8796b3" stroke="#cdd8ee" stroke-width=".5"/>`
+      : `<circle cx="${x}" cy="${y}" r="2.6" fill="#18223a" stroke="#e8f1ff" stroke-width=".7"/>`;
+  });
+  out += `<circle id="orb" r="1.9" fill="#fff" filter="url(#glow)"/>`;
+  board.innerHTML = out;
+  $('undo').disabled = history.length === 0;
+  $('hint').disabled = solved;
+  $('solved').classList.toggle('show', solved);
+  placeOrb();
+}
+
+function placeOrb() {
+  const orb = document.getElementById('orb');
+  if (!orb) return;
+  const [x, y] = curvePoint(cps, orbT);
+  orb.setAttribute('cx', x);
+  orb.setAttribute('cy', y);
+}
+
+let last = performance.now();
+function frame(now) {
+  orbT = (orbT + (now - last) / 1000 * (solved ? 0.22 : 0.12)) % 1;
+  last = now;
+  placeOrb();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------------------------------------------------------------------------
+// Thao tác: kéo điểm điều khiển
+// ---------------------------------------------------------------------------
+function toBoard(ev) {
+  const rect = board.getBoundingClientRect();
+  return [(ev.clientX - rect.left) / rect.width * 100, (ev.clientY - rect.top) / rect.height * 100];
+}
+
+board.addEventListener('pointerdown', ev => {
+  if (solved) return;
+  const p = toBoard(ev);
+  let best = -1, bestD = 8;
+  // `<=`: hai điểm trùng chỗ thì chọn điểm vẽ sau, tức điểm người chơi đang nhìn thấy ở trên.
+  cps.forEach((c, k) => { const d = dist(c, p); if (d <= bestD) { best = k; bestD = d; } });
+  if (best < 0) return;
+  if (level.locked.includes(best)) { toast('Điểm này bị ghim'); return; }
+  drag = { k: best, before: cps.map(c => c.slice()) };
+  ghost = null;
+  board.setPointerCapture(ev.pointerId);
+});
+
+board.addEventListener('pointermove', ev => {
+  if (!drag) return;
+  const [x, y] = toBoard(ev);
+  cps[drag.k] = [Math.max(3, Math.min(97, x)), Math.max(3, Math.min(97, y))];
+  render();
+});
+
+function endDrag() {
+  if (!drag) return;
+  if (JSON.stringify(drag.before) !== JSON.stringify(cps)) history.push(drag.before);
+  drag = null;
+  render();
+}
+board.addEventListener('pointerup', endDrag);
+board.addEventListener('pointercancel', endDrag);
+
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 2400);
+}
+
+$('undo').onclick = () => { if (history.length) { cps = history.pop(); render(); } };
+$('reset').onclick = () => {
+  if (JSON.stringify(cps) === JSON.stringify(level.start)) return;
+  history.push(cps.map(c => c.slice()));
+  cps = level.start.map(p => p.slice());
+  render();
+};
+// Gợi ý: điểm lệch xa nhất so với lời giải được chỉ đường tới vị trí đúng, kèm vòng lời giải mờ.
+$('hint').onclick = () => {
+  let k = -1, far = 0;
+  cps.forEach((c, i) => { const d = dist(c, level.sol[i]); if (d > far) { far = d; k = i; } });
+  if (k < 0) return;
+  ghost = { k, cps: level.sol };
+  toast('Kéo điểm này tới vòng tròn trắng');
+  render();
+  setTimeout(() => { ghost = null; render(); }, 2600);
+};
+$('prev').onclick = () => load(index - 1);
+$('next').onclick = () => load(index + 1);
+$('continue').onclick = () => { if (index < LEVELS.length - 1) load(index + 1); else toast('Hết level mẫu!'); };
+
+load(store.get().level || 0);
+</script>
+</body>
+</html>

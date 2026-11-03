@@ -3,7 +3,8 @@
     "rootNamespace": "Puzzle.Presentation",
     "references": [
         "Puzzle.Domain",
-        "Puzzle.Application"
+        "Puzzle.Application",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

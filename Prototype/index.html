@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Puzzle Prototype</title>
+<style>
+  :root {
+    --bg: #4d4f54;
+    --panel: #3c3e42;
+    --text: #f3efe6;
+    --muted: #b9b5ab;
+    --accent: #f4c542;
+    --parchment: #e6d7b4;
+    --unpainted: #f2f0eb;
+    --border: #292b33;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { display: flex; justify-content: center; }
+  #app { width: 100%; max-width: 480px; min-height: 100%; display: flex; flex-direction: column;
+    gap: 10px; padding: 12px 14px calc(14px + env(safe-area-inset-bottom)); user-select: none; -webkit-user-select: none; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  header h1 { font-size: 17px; margin: 0; text-align: center; flex: 1; font-weight: 600; }
+  header small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .nav { width: 40px; height: 40px; border-radius: 10px; border: 0; background: var(--panel); color: var(--text);
+    font-size: 18px; cursor: pointer; }
+  .nav:disabled { opacity: .3; cursor: default; }
+
+  .tip { background: #2f6f86; border: 2px solid #5fb4cf; border-radius: 12px; padding: 9px 12px;
+    font-size: 14px; line-height: 1.35; min-height: 44px; display: flex; align-items: center; }
+
+  .bank { background: var(--panel); border-radius: 12px; padding: 8px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .bank .label { font-size: 12px; color: var(--muted); width: 100%; }
+  .bank svg { display: block; }
+
+  #boardWrap { background: var(--parchment); border-radius: 14px; padding: 10px; touch-action: none; }
+  #board { width: 100%; max-height: 56vh; display: block; touch-action: none; cursor: crosshair; }
+
+  .palette { display: flex; justify-content: space-between; gap: 6px; }
+  .swatch { flex: 1; aspect-ratio: 1; max-width: 44px; border-radius: 10px; border: 3px solid transparent; cursor: pointer; padding: 0; }
+  .swatch.on { border-color: #fff; box-shadow: 0 0 0 2px #0006; }
+
+  .actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .actions button { height: 46px; border-radius: 12px; border: 0; background: var(--panel); color: var(--text);
+    font-size: 13px; cursor: pointer; padding: 0 4px; }
+  .actions button:active:not(:disabled) { background: #55585e; }
+  .actions button:disabled { opacity: .35; cursor: default; }
+
+  .toast { text-align: center; font-size: 13px; color: var(--accent); min-height: 18px; }
+  .hint { text-align: center; font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+  #solved { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center;
+    transform: translateY(110%); transition: transform .3s; pointer-events: none; }
+  #solved.show { transform: none; pointer-events: auto; }
+  #solved .bar { width: 100%; max-width: 480px; margin: 0 14px calc(14px + env(safe-area-inset-bottom)); background: #2e7d4f;
+    border: 2px solid #7ed6a0; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
+  #solved button { background: #fff; color: #1d5a37; border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="nav" id="prev" aria-label="Level trước">‹</button>
+    <h1 id="title"></h1>
+    <button class="nav" id="next" aria-label="Level sau">›</button>
+  </header>
+  <div class="tip" id="tip"></div>
+  <div class="bank" id="bank"></div>
+  <div id="boardWrap"><svg id="board"></svg></div>
+  <div class="palette" id="palette"></div>
+  <div class="actions">
+    <button id="undo">Hoàn tác</button>
+    <button id="redo">Làm lại bước</button>
+    <button id="reset">Chơi lại</button>
+    <button id="hint">Gợi ý</button>
+    <button id="check">Kiểm tra</button>
+  </div>
+  <div class="toast" id="toast"></div>
+  <div class="hint">Kéo qua các ô để gộp vùng · Chạm khe giữa hai ô để đặt/xoá ranh giới · Nhấn giữ một ô để xoá vùng</div>
+</div>
+<div id="solved"><div class="bar"><span>Hoàn thành ✓</span><button id="continue">Tiếp tục</button></div></div>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// Level: cùng định dạng .pzl của dự án Unity (Docs/design/level-format.md)
+// ---------------------------------------------------------------------------
+const LEVEL_TEXTS = [
+`// Level 1: một hình L duy nhất, làm quen thao tác kéo gộp.
+id: p1-01
+tip: Kéo ngón qua các ô để gộp thành một vùng. Mỗi vùng phải là hình L.
+difficulty: 1
+shape L
+#.
+#.
+##
+rule shape-bank L
+solution
+AAA.
+BBA.
+B..C
+BCCC`,
+`// Level 2: chỉ có hình T.
+id: p1-02
+tip: Hình được xoay và lật tuỳ ý. Ô khuyết không thuộc vùng nào.
+difficulty: 1
+shape T
+###
+.#.
+rule shape-bank T
+solution
+.AAA
+B.AC
+BBCC
+BD.C
+DDD.`,
+`// Level 3: bank hai hình, thanh 3 ô và L.
+id: p1-03
+tip: Kho có hai hình: mỗi vùng là một trong hai.
+difficulty: 2
+shape L
+#.
+#.
+##
+shape I
+###
+rule shape-bank L I
+solution
+AABBB
+CADEB
+CADE.
+C.DEE`,
+`// Level 4: hình S và L.
+id: p1-04
+tip: Chạm vào khe giữa hai ô để đặt ranh giới đánh dấu chỗ chắc chắn tách.
+difficulty: 2
+shape S
+.##
+##.
+shape L
+#.
+#.
+##
+rule shape-bank S L
+solution
+AAABB
+A.CCB
+.CCDB
+EE.D.
+.EEDD`,
+`// Level 5: ngũ giác P (5 ô) và L.
+id: p1-05
+tip: Giữ ngón trên một vùng để xoá nó. Hoàn tác nếu lỡ tay.
+difficulty: 3
+shape P
+##
+##
+#.
+shape L
+#.
+#.
+##
+rule shape-bank P L
+solution
+A.BBCC
+AA.BCC
+AADB.C
+EEDDDF
+EEEFFF`,
+];
+
+function parseLevel(text, fallbackId) {
+  const level = { id: fallbackId, tip: '', difficulty: 1, shapes: {}, bank: [], solution: [] };
+  const lines = text.split('\n').map(l => l.replace(/\/\/.*$/, '').trimEnd());
+  let i = 0;
+  // Khối lưới dừng ở dòng đầu tiên không đúng mẫu, nên không cần dòng trống ngăn cách.
+  const readBlock = pattern => {
+    const rows = [];
+    while (i < lines.length && pattern.test(lines[i].trim())) rows.push(lines[i++].trim());
+    return rows;
+  };
+  while (i < lines.length) {
+    const line = lines[i++].trim();
+    if (!line) continue;
+    if (line.startsWith('id:')) level.id = line.slice(3).trim();
+    else if (line.startsWith('tip:')) level.tip = line.slice(4).trim();
+    else if (line.startsWith('difficulty:')) level.difficulty = +line.slice(11);
+    else if (line.startsWith('shape ')) level.shapes[line.slice(6).trim()] = readBlock(/^[#.]+$/);
+    else if (line.startsWith('rule shape-bank')) level.bank = line.slice(15).trim().split(/\s+/);
+    else if (line === 'solution') level.solution = readBlock(/^[A-Za-z0-9.]+$/);
+  }
+  return level;
+}
+
+// ---------------------------------------------------------------------------
+// Domain: hình (xoay/lật), vùng, luật Shape Bank
+// ---------------------------------------------------------------------------
+const U = 0, J = 1, B = 2;   // cạnh: chưa quyết định / đã gộp / ranh giới
+
+function canonical(cells) {
+  const xf = [(r, c) => [r, c], (r, c) => [r, -c], (r, c) => [-r, c], (r, c) => [-r, -c],
+              (r, c) => [c, r], (r, c) => [c, -r], (r, c) => [-c, r], (r, c) => [-c, -r]];
+  let best = null;
+  for (const f of xf) {
+    const t = cells.map(([r, c]) => f(r, c));
+    const mr = Math.min(...t.map(p => p[0])), mc = Math.min(...t.map(p => p[1]));
+    const key = t.map(([r, c]) => [r - mr, c - mc]).sort((a, b) => a[0] - b[0] || a[1] - b[1])
+      .map(p => p.join(',')).join(';');
+    if (best === null || key < best) best = key;
+  }
+  return best;
+}
+
+function shapeCells(rows) {
+  const cells = [];
+  rows.forEach((row, r) => [...row].forEach((ch, c) => { if (ch === '#') cells.push([r, c]); }));
+  return cells;
+}
+
+class Puzzle {
+  constructor(level) {
+    this.level = level;
+    const rows = level.solution;
+    this.H = rows.length;
+    this.W = rows[0].length;
+    this.cellAt = [];            // [r][c] -> chỉ số ô, -1 nếu khuyết
+    this.cells = [];             // {r, c}
+    for (let r = 0; r < this.H; r++) {
+      this.cellAt.push([]);
+      for (let c = 0; c < this.W; c++) {
+        const has = rows[r][c] !== '.';
+        this.cellAt[r].push(has ? this.cells.length : -1);
+        if (has) this.cells.push({ r, c, label: rows[r][c] });
+      }
+    }
+    this.edges = [];             // {a, b, h}: a<b, h = cạnh ngang giữa (r,c)-(r,c+1)
+    this.edgeOf = new Map();
+    for (const cell of this.cells) {
+      const a = this.cellAt[cell.r][cell.c];
+      if (cell.c + 1 < this.W && this.cellAt[cell.r][cell.c + 1] >= 0) this.addEdge(a, this.cellAt[cell.r][cell.c + 1], true);
+      if (cell.r + 1 < this.H && this.cellAt[cell.r + 1][cell.c] >= 0) this.addEdge(a, this.cellAt[cell.r + 1][cell.c], false);
+    }
+    // Trạng thái đúng của từng cạnh theo lời giải
+    this.solutionEdge = this.edges.map(e => this.cells[e.a].label === this.cells[e.b].label ? J : B);
+
+    this.bankShapes = level.bank.map(name => shapeCells(level.shapes[name]));
+    this.bankKeys = new Set(this.bankShapes.map(canonical));
+    this.maxArea = Math.max(...this.bankShapes.map(s => s.length));
+  }
+
+  addEdge(a, b, h) {
+    this.edgeOf.set(a + ',' + b, this.edges.length);
+    this.edges.push({ a, b, h });
+  }
+
+  edgeIndex(a, b) { return this.edgeOf.get(Math.min(a, b) + ',' + Math.max(a, b)); }
+
+  blankState() {
+    return { edge: new Uint8Array(this.edges.length), paint: new Int8Array(this.cells.length).fill(-1) };
+  }
+
+  // Chia vùng: ô nối nhau bằng cạnh Joined; mỗi vùng đếm cạnh Unknown mở ra ngoài.
+  regions(state) {
+    const parent = this.cells.map((_, i) => i);
+    const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    this.edges.forEach((e, i) => { if (state.edge[i] === J) parent[find(e.b)] = find(e.a); });
+
+    const idOfRoot = new Map(), ofCell = [], list = [];
+    this.cells.forEach((cell, i) => {
+      const root = find(i);
+      if (!idOfRoot.has(root)) { idOfRoot.set(root, list.length); list.push({ id: list.length, cells: [], open: 0 }); }
+      ofCell[i] = idOfRoot.get(root);
+      list[ofCell[i]].cells.push(i);
+    });
+    this.edges.forEach((e, i) => {
+      if (state.edge[i] !== U || ofCell[e.a] === ofCell[e.b]) return;
+      list[ofCell[e.a]].open++;
+      list[ofCell[e.b]].open++;
+    });
+    return { list, ofCell };
+  }
+
+  // Trả {solved, broken: Set<regionId>, regions}
+  validate(state) {
+    const regions = this.regions(state);
+    const broken = new Set();
+    let ok = true;
+    for (const region of regions.list) {
+      const key = canonical(region.cells.map(i => [this.cells[i].r, this.cells[i].c]));
+      if (this.bankKeys.has(key)) continue;
+      ok = false;
+      // Chỉ chắc chắn sai khi vùng đã to bằng hình lớn nhất hoặc không còn chỗ để gộp thêm.
+      if (region.cells.length >= this.maxArea || region.open === 0) broken.add(region.id);
+    }
+    return { solved: ok, broken, regions };
+  }
+
+  isMistake(state, e) { return state.edge[e] !== U && state.edge[e] !== this.solutionEdge[e]; }
+}
+
+// ---------------------------------------------------------------------------
+// Màu
+// ---------------------------------------------------------------------------
+const PAINTS = ['#fad23f', '#78c75c', '#4bc79a', '#f58c3d', '#ed6b8c', '#3dc7db', '#db424d', '#8c54b8', '#456bdb'];
+const UNPAINTED = '#f2f0eb', HIGHLIGHT = '#fff04d', PREVIEW = '#fff8cc', DOTS = '#8a8478', BORDER = '#25272e';
+
+function mix(hexA, hexB, t) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const a = p(hexA), b = p(hexB);
+  return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Game: trạng thái, lịch sử undo/redo, lưu ván
+// ---------------------------------------------------------------------------
+const STORE_KEY = 'puzzle-prototype-v1';
+const store = {
+  read() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; } },
+  write(data) { try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch (e) { /* bỏ qua */ } },
+};
+
+const LEVELS = LEVEL_TEXTS.map((t, i) => parseLevel(t, 'level-' + (i + 1)));
+const $ = id => document.getElementById(id);
+const SZ = 60, GAP = 4, PAD = 6;
+
+let puzzle, state, history, cursor, levelIndex, paintIndex = 0, solved = false;
+let highlight = new Set(), preview = new Set();
+
+function snapshot() { return { edge: state.edge.slice(), paint: state.paint.slice() }; }
+function sameState(a, b) {
+  return a.edge.every((v, i) => v === b.edge[i]) && a.paint.every((v, i) => v === b.paint[i]);
+}
+
+function loadLevel(index) {
+  levelIndex = Math.max(0, Math.min(LEVELS.length - 1, index));
+  puzzle = new Puzzle(LEVELS[levelIndex]);
+  state = puzzle.blankState();
+  const saved = store.read().saves?.[puzzle.level.id];
+  if (saved && saved.edge.length === state.edge.length) {
+    state.edge = Uint8Array.from(saved.edge);
+    state.paint = Int8Array.from(saved.paint);
+  }
+  history = [snapshot()];
+  cursor = 0;
+  highlight = new Set();
+  preview = new Set();
+  const data = store.read();
+  data.level = levelIndex;
+  store.write(data);
+
+  $('title').innerHTML = `Level ${levelIndex + 1}<small>Độ khó ${'★'.repeat(puzzle.level.difficulty)}${'☆'.repeat(5 - puzzle.level.difficulty)}</small>`;
+  $('tip').textContent = puzzle.level.tip;
+  $('prev').disabled = levelIndex === 0;
+  $('next').disabled = levelIndex === LEVELS.length - 1;
+  renderBank();
+  render();
+}
+
+function persist() {
+  const data = store.read();
+  data.saves = data.saves || {};
+  data.saves[puzzle.level.id] = { edge: Array.from(state.edge), paint: Array.from(state.paint) };
+  store.write(data);
+}
+
+// Mọi thay đổi đi qua đây: bỏ qua nếu không đổi gì (không vào lịch sử), cắt nhánh redo.
+function commit(mutate) {
+  const before = snapshot();
+  mutate();
+  if (sameState(before, state)) return false;
+  history = history.slice(0, cursor + 1);
+  history.push(snapshot());
+  cursor++;
+  afterChange();
+  return true;
+}
+
+function restore(index) {
+  cursor = index;
+  state.edge = history[cursor].edge.slice();
+  state.paint = history[cursor].paint.slice();
+  afterChange();
+}
+
+function afterChange() {
+  highlight = new Set();
+  persist();
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Command: gộp ô, đặt ranh giới, xoá vùng, chơi lại
+// ---------------------------------------------------------------------------
+function mergeCells(path) {
+  commit(() => {
+    for (let i = 1; i < path.length; i++) {
+      const e = puzzle.edgeIndex(path[i - 1], path[i]);
+      if (e !== undefined) state.edge[e] = J;
+    }
+    paintRegionsOf(path, paintIndex);
+  });
+}
+
+function paintRegionsOf(cellList, paint) {
+  const regions = puzzle.regions(state);
+  const done = new Set();
+  for (const cell of cellList) {
+    const id = regions.ofCell[cell];
+    if (done.has(id)) continue;
+    done.add(id);
+    for (const c of regions.list[id].cells) state.paint[c] = paint;
+  }
+}
+
+function toggleBorder(a, b) {
+  const e = puzzle.edgeIndex(a, b);
+  if (e === undefined) return;
+  commit(() => { state.edge[e] = state.edge[e] === B ? U : B; });
+}
+
+function clearRegion(cell) {
+  commit(() => {
+    const regions = puzzle.regions(state);
+    const id = regions.ofCell[cell];
+    puzzle.edges.forEach((e, i) => {
+      if (regions.ofCell[e.a] === id || regions.ofCell[e.b] === id) state.edge[i] = U;
+    });
+    for (const c of regions.list[id].cells) state.paint[c] = -1;
+  });
+}
+
+function resetBoard() {
+  commit(() => { state.edge.fill(U); state.paint.fill(-1); });
+}
+
+// ---------------------------------------------------------------------------
+// Booster: Gợi ý và Kiểm tra (so với lời giải có sẵn trong level)
+// ---------------------------------------------------------------------------
+function useHint() {
+  if (solved) return;
+  let e = puzzle.edges.findIndex((_, i) => puzzle.isMistake(state, i));
+  if (e < 0) e = puzzle.edges.findIndex((_, i) => state.edge[i] === U && puzzle.solutionEdge[i] === J);
+  if (e < 0) { toast('Không còn gì để gợi ý'); return; }
+  const { a, b } = puzzle.edges[e];
+  commit(() => {
+    state.edge[e] = puzzle.solutionEdge[e];
+    if (state.edge[e] === J) paintRegionsOf([a, b], paintIndex);
+  });
+  highlight = new Set([a, b]);
+  render();
+  setTimeout(() => { highlight = new Set(); render(); }, 1400);
+}
+
+function useCheck() {
+  if (solved) return;
+  const wrong = new Set();
+  puzzle.edges.forEach((e, i) => { if (puzzle.isMistake(state, i)) { wrong.add(e.a); wrong.add(e.b); } });
+  if (wrong.size === 0) { toast('Chưa có gì sai'); return; }
+  const regions = puzzle.regions(state);
+  highlight = new Set();
+  for (const cell of wrong) for (const c of regions.list[regions.ofCell[cell]].cells) highlight.add(c);
+  toast('Các vùng được tô sáng đang có chỗ sai');
+  render();
+  setTimeout(() => { highlight = new Set(); render(); }, 1800);
+}
+
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 2200);
+}
+
+// ---------------------------------------------------------------------------
+// Vẽ
+// ---------------------------------------------------------------------------
+function renderBank() {
+  const parts = puzzle.bankShapes.map(cells => {
+    const w = Math.max(...cells.map(p => p[1])) + 1, h = Math.max(...cells.map(p => p[0])) + 1, s = 14;
+    const rects = cells.map(([r, c]) => `<rect x="${c * s}" y="${r * s}" width="${s - 2}" height="${s - 2}" rx="3" fill="#f4c542"/>`).join('');
+    return `<svg width="${w * s}" height="${h * s}" viewBox="0 0 ${w * s} ${h * s}">${rects}</svg>`;
+  });
+  $('bank').innerHTML = `<div class="label">Mọi vùng phải là một trong các hình này (xoay, lật tuỳ ý)</div>${parts.join('')}`;
+}
+
+function render() {
+  const { solved: ok, broken, regions } = puzzle.validate(state);
+  solved = ok;
+  const w = puzzle.W * SZ, h = puzzle.H * SZ;
+  const svg = $('board');
+  svg.setAttribute('viewBox', `${-PAD} ${-PAD} ${w + 2 * PAD} ${h + 2 * PAD}`);
+
+  const colorOf = i => {
+    if (highlight.has(i)) return HIGHLIGHT;
+    if (preview.has(i)) return PREVIEW;
+    let color = state.paint[i] >= 0 ? PAINTS[state.paint[i]] : UNPAINTED;
+    if (broken.has(regions.ofCell[i])) color = mix(color, '#f21414', 0.7);
+    return color;
+  };
+  const joined = (a, b) => { const e = puzzle.edgeIndex(a, b); return e !== undefined && state.edge[e] === J; };
+  const at = (r, c) => (r >= 0 && c >= 0 && r < puzzle.H && c < puzzle.W) ? puzzle.cellAt[r][c] : -1;
+
+  let out = '';
+  for (let i = 0; i < puzzle.cells.length; i++) {
+    const { r, c } = puzzle.cells[i];
+    const x = c * SZ + GAP, y = r * SZ + GAP, s = SZ - 2 * GAP;
+    out += `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="9" fill="${colorOf(i)}"/>`;
+    const right = at(r, c + 1), down = at(r + 1, c);
+    if (right >= 0 && joined(i, right)) out += `<rect x="${x + s - 1}" y="${y}" width="${2 * GAP + 2}" height="${s}" fill="${colorOf(i)}"/>`;
+    if (down >= 0 && joined(i, down)) out += `<rect x="${x}" y="${y + s - 1}" width="${s}" height="${2 * GAP + 2}" fill="${colorOf(i)}"/>`;
+    // Điểm giữa bốn ô cùng gộp: lấp lỗ
+    const diag = at(r + 1, c + 1);
+    if (right >= 0 && down >= 0 && diag >= 0 && joined(i, right) && joined(i, down) && joined(right, diag) && joined(down, diag)) {
+      out += `<rect x="${x + s - 1}" y="${y + s - 1}" width="${2 * GAP + 2}" height="${2 * GAP + 2}" fill="${colorOf(i)}"/>`;
+    }
+  }
+  // Đường chấm (cạnh chưa quyết định) và ranh giới đã đặt
+  puzzle.edges.forEach((e, i) => {
+    const A = puzzle.cells[e.a];
+    const cx = e.h ? (A.c + 1) * SZ : A.c * SZ + SZ / 2;
+    const cy = e.h ? A.r * SZ + SZ / 2 : (A.r + 1) * SZ;
+    const [x1, y1, x2, y2] = e.h ? [cx, cy - 18, cx, cy + 18] : [cx - 18, cy, cx + 18, cy];
+    if (state.edge[i] === U) out += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${DOTS}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 6"/>`;
+    else if (state.edge[i] === B) out += `<line x1="${x1}" y1="${y1 - (e.h ? 8 : 0)}" x2="${x2}" y2="${y2 + (e.h ? 8 : 0)}" stroke="${BORDER}" stroke-width="7" stroke-linecap="round"/>`;
+  });
+  svg.innerHTML = out;
+
+  $('undo').disabled = cursor === 0;
+  $('redo').disabled = cursor >= history.length - 1;
+  $('hint').disabled = $('check').disabled = solved;
+  $('solved').classList.toggle('show', solved);
+  if (solved) { const d = store.read(); d.done = d.done || {}; d.done[puzzle.level.id] = true; store.write(d); }
+  $('continue').textContent = levelIndex === LEVELS.length - 1 ? 'Xong' : 'Tiếp tục';
+}
+
+// ---------------------------------------------------------------------------
+// Input: kéo = gộp, chạm khe = ranh giới, nhấn giữ = xoá vùng
+// ---------------------------------------------------------------------------
+const board = $('board');
+let drag = null;
+
+function toBoard(ev) {
+  const rect = board.getBoundingClientRect();
+  const vb = board.viewBox.baseVal;
+  return { x: (ev.clientX - rect.left) / rect.width * vb.width + vb.x, y: (ev.clientY - rect.top) / rect.height * vb.height + vb.y };
+}
+function cellOfPoint(p) {
+  const c = Math.floor(p.x / SZ), r = Math.floor(p.y / SZ);
+  return (r >= 0 && c >= 0 && r < puzzle.H && c < puzzle.W) ? puzzle.cellAt[r][c] : -1;
+}
+
+board.addEventListener('pointerdown', ev => {
+  if (solved) return;
+  board.setPointerCapture(ev.pointerId);
+  const p = toBoard(ev);
+  const cell = cellOfPoint(p);
+  drag = { start: p, last: p, path: cell >= 0 ? [cell] : [], moved: false, longPressed: false, timer: null };
+  if (cell >= 0) {
+    drag.timer = setTimeout(() => {
+      if (!drag || drag.path.length > 1) return;
+      drag.longPressed = true;
+      clearRegion(cell);
+    }, 480);
+  }
+});
+
+board.addEventListener('pointermove', ev => {
+  if (!drag || drag.longPressed) return;
+  const p = toBoard(ev);
+  if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 8) drag.moved = true;
+  // Nội suy để ngón lướt nhanh vẫn ra đường liền mạch
+  const steps = Math.max(1, Math.ceil(Math.hypot(p.x - drag.last.x, p.y - drag.last.y) / (SZ / 4)));
+  for (let s = 1; s <= steps; s++) {
+    const q = { x: drag.last.x + (p.x - drag.last.x) * s / steps, y: drag.last.y + (p.y - drag.last.y) * s / steps };
+    const cell = cellOfPoint(q);
+    if (cell < 0) continue;
+    const tail = drag.path[drag.path.length - 1];
+    if (cell === tail) continue;
+    if (tail === undefined || puzzle.edgeIndex(tail, cell) !== undefined) drag.path.push(cell);
+  }
+  drag.last = p;
+  if (drag.path.length > 1) {
+    clearTimeout(drag.timer);
+    preview = new Set(drag.path);
+    render();
+  }
+});
+
+function endDrag(ev, cancelled) {
+  if (!drag) return;
+  clearTimeout(drag.timer);
+  const d = drag;
+  drag = null;
+  preview = new Set();
+  if (cancelled || d.longPressed) { render(); return; }
+  if (d.path.length > 1) { mergeCells(d.path); return; }
+  render();
+  if (!d.moved) tapAt(d.start);
+}
+board.addEventListener('pointerup', ev => endDrag(ev, false));
+board.addEventListener('pointercancel', ev => endDrag(ev, true));
+board.addEventListener('contextmenu', ev => ev.preventDefault());
+
+// Chạm sát mép một ô (phía có ô kề) thì đặt/xoá ranh giới ở khe đó.
+function tapAt(p) {
+  const cell = cellOfPoint(p);
+  if (cell < 0) return;
+  const { r, c } = puzzle.cells[cell];
+  const lx = p.x / SZ - c, ly = p.y / SZ - r;
+  const sides = [[lx, r, c - 1], [1 - lx, r, c + 1], [ly, r - 1, c], [1 - ly, r + 1, c]]
+    .filter(([, nr, nc]) => nr >= 0 && nc >= 0 && nr < puzzle.H && nc < puzzle.W && puzzle.cellAt[nr][nc] >= 0)
+    .sort((a, b) => a[0] - b[0]);
+  if (sides.length && sides[0][0] < 0.26) toggleBorder(cell, puzzle.cellAt[sides[0][1]][sides[0][2]]);
+}
+
+// ---------------------------------------------------------------------------
+// Giao diện: bảng màu, nút, chuyển level
+// ---------------------------------------------------------------------------
+PAINTS.forEach((color, i) => {
+  const b = document.createElement('button');
+  b.className = 'swatch' + (i === paintIndex ? ' on' : '');
+  b.style.background = color;
+  b.setAttribute('aria-label', 'Màu ' + (i + 1));
+  b.onclick = () => {
+    paintIndex = i;
+    document.querySelectorAll('.swatch').forEach((s, j) => s.classList.toggle('on', j === i));
+  };
+  $('palette').appendChild(b);
+});
+
+$('undo').onclick = () => { if (cursor > 0) restore(cursor - 1); };
+$('redo').onclick = () => { if (cursor < history.length - 1) restore(cursor + 1); };
+$('reset').onclick = resetBoard;
+$('hint').onclick = useHint;
+$('check').onclick = useCheck;
+$('prev').onclick = () => loadLevel(levelIndex - 1);
+$('next').onclick = () => loadLevel(levelIndex + 1);
+$('continue').onclick = () => { if (levelIndex < LEVELS.length - 1) loadLevel(levelIndex + 1); else toast('Hết level mẫu!'); };
+
+loadLevel(store.read().level || 0);
+</script>
+</body>
+</html>

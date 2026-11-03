@@ -8,16 +8,16 @@ namespace Puzzle.Tests.Regions
     public class RegionMapTests
     {
         [Test]
-        public void FreshBoard_IsOneUnsettledRegion()
+        public void FreshBoard_IsOneOpenRegionPerCell()
         {
             var state = new PuzzleState(BoardShape.Rectangle(3, 3));
 
             var map = new RegionMap(state);
 
-            Assert.AreEqual(1, map.Count);
-            Assert.AreEqual(9, map.Regions[0].Area);
-            Assert.AreEqual(12, map.Regions[0].UnknownInnerEdges);
-            Assert.IsFalse(map.Regions[0].IsSettled);
+            Assert.AreEqual(9, map.Count);
+            Assert.AreEqual(2, map.RegionOf(new Cell(0, 0)).OpenSides);
+            Assert.AreEqual(4, map.RegionOf(new Cell(1, 1)).OpenSides);
+            foreach (Region region in map.Regions) Assert.IsFalse(region.IsClosed);
         }
 
         [Test]
@@ -34,7 +34,7 @@ namespace Puzzle.Tests.Regions
             Assert.AreEqual(map.RegionIdOf(new Cell(0, 0)), map.RegionIdOf(new Cell(1, 1)));
             Assert.AreNotEqual(map.RegionIdOf(new Cell(0, 0)), map.RegionIdOf(new Cell(0, 1)));
             Assert.AreEqual(3, map.RegionOf(new Cell(2, 2)).Area);
-            foreach (Region region in map.Regions) Assert.IsTrue(region.IsSettled);
+            foreach (Region region in map.Regions) Assert.IsTrue(region.IsClosed);
         }
 
         [Test]
@@ -49,7 +49,7 @@ namespace Puzzle.Tests.Regions
         }
 
         [Test]
-        public void UnknownEdge_StillConnectsCells_AndIsCountedInside()
+        public void UnknownEdge_SeparatesCells_AndCountsAsOpenSide()
         {
             PuzzleState state = TestBoards.StateOf(
                 "AB",
@@ -58,8 +58,20 @@ namespace Puzzle.Tests.Regions
 
             var map = new RegionMap(state);
 
-            Assert.AreEqual(1, map.Count);
-            Assert.AreEqual(1, map.Regions[0].UnknownInnerEdges);
+            Assert.AreEqual(2, map.Count);
+            Assert.AreEqual(1, map.Regions[0].OpenSides);
+            Assert.AreEqual(1, map.Regions[1].OpenSides);
+        }
+
+        [Test]
+        public void BorderOnly_DoesNotMerge_JoinedDoes()
+        {
+            var state = new PuzzleState(BoardShape.Rectangle(2, 1));
+            state.SetEdge(TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Border);
+            Assert.AreEqual(2, new RegionMap(state).Count);
+
+            state.SetEdge(TestBoards.EdgeBetween(0, 0, 1, 0), EdgeState.Joined);
+            Assert.AreEqual(1, new RegionMap(state).Count);
         }
 
         [Test]

@@ -1,0 +1,23 @@
+// Level 5: ngũ giác P (5 ô) và L.
+id: p1-05
+tip: Giữ ngón trên một vùng để xoá nó. Hoàn tác nếu lỡ tay.
+difficulty: 3
+
+shape P
+##
+##
+#.
+
+shape L
+#.
+#.
+##
+
+rule shape-bank P L
+
+solution
+A.BBCC
+AA.BCC
+AADB.C
+EEDDDF
+EEEFFF
